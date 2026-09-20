@@ -39,3 +39,11 @@ core
 .idea/
 .DS_Store
 Thumbs.db
+
+# Signing secrets / local signing output
+*.pem
+*.key
+*.p12
+*.pfx
+signing/keys/
+out/signing/

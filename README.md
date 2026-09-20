@@ -178,3 +178,13 @@ Inspect `git status` before every push.
 ## License
 
 No open-source license is included in this kit. Add the license you actually want before making the repository public.
+
+## Complete package
+
+- `aod/` - AOD daemon + NEES4 verifier
+- `fod/` - fingerprint + DisplayPanelFeature compatibility
+- `sensor/` - pickup/tilt sensor compatibility HAL
+- `framework/` - property-gated AOD framework patch
+- `signing/` - developer self-signing tools
+
+No SystemUI patch is required. The official private signing key is not stored in this repository.
