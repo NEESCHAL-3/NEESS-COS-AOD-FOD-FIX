@@ -1,0 +1,16 @@
+[package]
+name = "nees-rodin-aodd"
+version = "2.0.0"
+edition = "2021"
+
+[dependencies]
+base64 = "0.22"
+ed25519-dalek = { version = "2.1", default-features = false, features = ["std"] }
+sha2 = "0.10"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

@@ -1,0 +1,24 @@
+service mfp-daemon /vendor/bin/hw/mfp-daemon
+    override
+    interface aidl android.hardware.biometrics.fingerprint.IFingerprint/default
+    class late_start
+    user system
+    group system drmrpc diag input uhid
+    seclabel u:r:hal_fingerprint_default:s0
+    socket fpsensor_socket stream 0777 system system
+    setenv LD_PRELOAD /vendor/lib64/librodin_fp_compat.so
+
+on boot
+    chown system system /sys/devices/platform/goodix_ts.0/fod_enable
+    chmod 0660 /sys/devices/platform/goodix_ts.0/fod_enable
+
+    chown system system /sys/devices/virtual/touch/touch_dev/fod_enable
+    chmod 0660 /sys/devices/virtual/touch/touch_dev/fod_enable
+
+    chown system system /sys/class/touch/touch_dev/fod_enable
+    chmod 0660 /sys/class/touch/touch_dev/fod_enable
+
+    mkdir /dev/mi_display 0755 system system
+    symlink /dev/disp_feature /dev/mi_display/disp_feature
+    chown system system /dev/disp_feature
+    chmod 0660 /dev/disp_feature

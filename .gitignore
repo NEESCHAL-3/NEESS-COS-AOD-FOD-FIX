@@ -1,0 +1,41 @@
+# Build output
+**/build/
+**/target/
+*.o
+*.so
+*.a
+
+# Private signing material
+*.pem
+*.key
+*.p12
+*.pfx
+nees_rodin_private.pem
+**/NEES-RODIN-AUTH/**
+**/private/**
+
+# Signing work products
+signature.bin
+auth.txt
+manifest.txt
+NEES4-SHARED-FINAL*/
+build.prop.current
+build.prop.nees4*
+system.build.prop.live
+
+# Device dumps / local backups
+*.img
+*.dump
+*.bak
+*.backup
+*.pre-*
+*.before-*
+logcat*
+tombstone*
+core
+
+# IDE/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
