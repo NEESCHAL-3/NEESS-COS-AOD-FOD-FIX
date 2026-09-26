@@ -4,6 +4,7 @@
 [![Device](https://img.shields.io/badge/Device-POCO%20X7%20Pro%20(Rodin)-blue.svg)]()
 [![SELinux](https://img.shields.io/badge/SELinux-100%25%20Enforcing%20Compliant-success.svg)]()
 [![Touch](https://img.shields.io/badge/Touch-Goodix%20%2B%20FocalTech-orange.svg)]()
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 Native under-display fingerprint (FOD) and Always-On Display (AOD) hardware compatibility layer for **POCO X7 Pro (Rodin)** running ColorOS ports. 
 
@@ -242,3 +243,25 @@ service list | grep -i displaypanel
 ## Credits & Authors
 * **NEESCHAL** – Lead developer, hardware reverse engineering, protocol shims, and timing state machines.
 * Community testers for feedback and telemetry logs.
+
+---
+
+## License
+
+This project is open-source software licensed under the [Apache License, Version 2.0](LICENSE).
+
+```text
+Copyright (c) 2026 NEESCHAL-3 and NEESS-COS-AOD-FOD-FIX Contributors
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+```

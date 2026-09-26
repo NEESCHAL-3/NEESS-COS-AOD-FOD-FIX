@@ -217,3 +217,9 @@ service list | grep -i displaypanel
 ```
 
 If all 4 commands check out, your baked ROM is fully functional!
+
+---
+
+## License
+
+This project is open-source software licensed under the [Apache License, Version 2.0](../LICENSE).
