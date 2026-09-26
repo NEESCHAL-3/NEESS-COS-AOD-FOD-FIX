@@ -96,6 +96,51 @@ The script automatically:
    `vendor/etc/init/zz_rodin_fp_compat.rc` -> `[ROM]/vendor/etc/init/zz_rodin_fp_compat.rc`
    * Permissions: `0644` (`rw-r--r--`, root:root)
    * SELinux context: `u:object_r:vendor_configs_file:s0`
+3. **Append Vendor Properties:**
+   Append these lines to `vendor.prop` (or `[ROM]/vendor/build.prop`):
+   ```properties
+vendor.fingerprint.aidl.support=1
+
+# Rodin Oplus FOD UI gate
+persist.vendor.fingerprint.type=udfps_optical
+persist.vendor.fingerprint.sensor_type=optical
+persist.vendor.fingerprint.fod.enable=true
+persist.vendor.fingerprint.animation=true
+persist.vendor.fingerprint.sensor_location=504,2332,105
+persist.vendor.fp.vendor=goodix
+
+# Oplus optical fingerprint support
+ro.oplus.biometrics.fingerprint.optical=true
+ro.oplus.aod.support=true
+ro.oplus.aod.fod.support=true
+ro.vendor.fod.animation.support=true
+persist.sys.fingerprint.animation=1
+persist.sys.fp.fod.anim=1
+persist.sys.fp.fod.screenoff=true
+
+# Rodin Xiaomi FOD core
+ro.hardware.fp.fod=true
+ro.hardware.fp.tddi=true
+ro.hardware.fp.fod.location=low
+ro.hardware.fp.fod.touch.ctl.version=2.0
+ro.hardware.fp.halworkmode=true
+ro.hardware.fp.mievent=true
+ro.hardware.fp.onetrack.period=3600000
+
+# Rodin Goodix FOD values
+persist.vendor.sys.fp.vendor=goodix_fod
+persist.vendor.sys.fp.module=ofilm
+persist.vendor.sys.fp.fod.optimize=true
+persist.vendor.sys.fp.expolevel=0x88
+persist.vendor.sys.fp.fod.location.X_Y=504,2332
+persist.vendor.sys.fp.fod.size.width_height=210,210
+persist.vendor.sys.fp.fp_anti_mistouch=true
+persist.vendor.sys.fp.heartbeat=true
+
+# Low brightness FOD thresholds
+ro.hardware.fp.fod.lowlight.lux.threshold=3
+ro.hardware.fp.fod.lowlight.brightness.threshold=411
+   ```
 
 ---
 
