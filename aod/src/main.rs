@@ -163,24 +163,6 @@ fn settings_put_async(name: &'static str, value: &'static str) {
     });
 }
 
-fn touch_set_fod(enable: bool) {
-    let val = if enable { "1" } else { "0" };
-    thread::spawn(move || {
-        let _ = Command::new("/system/bin/service")
-            .args([
-                "call",
-                "vendor.xiaomi.hw.touchfeature.ITouchFeature/default",
-                "9",
-                "i32",
-                "0",
-                "i32",
-                "10",
-                "i32",
-                val,
-            ])
-            .status();
-    });
-}
 
 fn write_backlight(value: u32) {
     if let Ok(mut f) = OpenOptions::new().write(true).open(BL) {
@@ -314,7 +296,6 @@ fn main() {
                     thread::sleep(Duration::from_millis(150));
                     ensure_aod_backlight();
                 });
-                touch_set_fod(true);
             }
 
             // 2. ALL-DAY AOD KEEPALIVE
@@ -359,11 +340,13 @@ fn main() {
 
             // 5. ULTRA-FAST SOFOD PATH (Screen-Off Fingerprint Hint)
             if fp_only_phase {
-                // Immediate trigger on motion pickup (AMD type 1) or tap (type 0)
-                if line.contains("notifyWakeUpCallback") {
+                // Immediate trigger on motion pickup, tilt, or sensor callback
+                if line.contains("notifyWakeUpCallback")
+                    || line.contains("RodinSensorCompat: instant pickup trigger")
+                    || line.contains("RodinSensorCompat: pickup -> synthetic 65611")
+                {
                     fp_panel_allowed = true;
                     write_backlight(FP_BL);
-                    touch_set_fod(true);
                     klog("SOFOD wake -> panel 100");
                 }
 

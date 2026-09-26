@@ -18,9 +18,14 @@
 
 #define HW_MODULE_TAG 0x48574d54u
 
-#define XIAOMI_PICKUP_TYPE 33171036
-#define OPLUS_TILT_TYPE    65611
-#define OPLUS_TILT_HANDLE  0x6f11
+#define XIAOMI_PICKUP_TYPE    33171036
+#define XIAOMI_FOD_TYPE       33171030
+#define XIAOMI_AOD_TYPE       33171029
+#define XIAOMI_IMU_HAND_TYPE  33171120
+#define MTK_TILT_TYPE         22
+#define MTK_SMD_TYPE          17
+#define OPLUS_TILT_TYPE       65611
+#define OPLUS_TILT_HANDLE     0x6f11
 
 typedef struct hw_module_t hw_module_t;
 typedef struct hw_device_t hw_device_t;
@@ -196,6 +201,11 @@ static sensor_t *g_list;
 static int g_list_count;
 
 static int g_pickup_handle = -1;
+static int g_tilt_handle = -1;
+static int g_fod_handle = -1;
+static int g_aod_handle = -1;
+static int g_smd_handle = -1;
+static int g_hand_handle = -1;
 static int g_synth_handle = OPLUS_TILT_HANDLE;
 
 static sensor_dev_prefix *g_dev;
@@ -318,6 +328,11 @@ static int build_sensor_list_locked(void)
     }
 
     g_pickup_handle = -1;
+    g_tilt_handle = -1;
+    g_fod_handle = -1;
+    g_aod_handle = -1;
+    g_smd_handle = -1;
+    g_hand_handle = -1;
 
     for (int i = 0;
          i < real_count;
@@ -335,8 +350,56 @@ static int build_sensor_list_locked(void)
                  real_list[i].name ?
                     real_list[i].name :
                     "(null)");
+        } else if (real_list[i].type == MTK_TILT_TYPE) {
+            g_tilt_handle =
+                real_list[i].handle;
 
-            break;
+            LOGI("found MTK tilt handle=%d flags=0x%x name=%s",
+                 g_tilt_handle,
+                 real_list[i].flags,
+                 real_list[i].name ?
+                    real_list[i].name :
+                    "(null)");
+        } else if (real_list[i].type == XIAOMI_FOD_TYPE) {
+            g_fod_handle =
+                real_list[i].handle;
+
+            LOGI("found Xiaomi FOD handle=%d flags=0x%x name=%s",
+                 g_fod_handle,
+                 real_list[i].flags,
+                 real_list[i].name ?
+                    real_list[i].name :
+                    "(null)");
+        } else if (real_list[i].type == XIAOMI_AOD_TYPE) {
+            g_aod_handle =
+                real_list[i].handle;
+
+            LOGI("found Xiaomi AOD handle=%d flags=0x%x name=%s",
+                 g_aod_handle,
+                 real_list[i].flags,
+                 real_list[i].name ?
+                    real_list[i].name :
+                    "(null)");
+        } else if (real_list[i].type == MTK_SMD_TYPE) {
+            g_smd_handle =
+                real_list[i].handle;
+
+            LOGI("found MTK SMD handle=%d flags=0x%x name=%s",
+                 g_smd_handle,
+                 real_list[i].flags,
+                 real_list[i].name ?
+                    real_list[i].name :
+                    "(null)");
+        } else if (real_list[i].type == XIAOMI_IMU_HAND_TYPE) {
+            g_hand_handle =
+                real_list[i].handle;
+
+            LOGI("found Xiaomi IMU hand handle=%d flags=0x%x name=%s",
+                 g_hand_handle,
+                 real_list[i].flags,
+                 real_list[i].name ?
+                    real_list[i].name :
+                    "(null)");
         }
     }
 
@@ -488,7 +551,12 @@ static int compat_activate(
     enabled = !!enabled;
 
     if (handle != g_synth_handle &&
-        handle != g_pickup_handle) {
+        handle != g_pickup_handle &&
+        handle != g_tilt_handle &&
+        handle != g_fod_handle &&
+        handle != g_aod_handle &&
+        handle != g_smd_handle &&
+        handle != g_hand_handle) {
 
         return g_orig_activate(
             dev,
@@ -513,7 +581,7 @@ static int compat_activate(
 
         g_synth_enabled =
             enabled;
-    } else {
+    } else if (handle == g_pickup_handle) {
         g_pickup_enabled =
             enabled;
     }
@@ -525,13 +593,56 @@ static int compat_activate(
     int rc = 0;
 
     if (old_real != new_real) {
-        rc =
-            g_orig_activate(
+        if (g_pickup_handle >= 0) {
+            int r = g_orig_activate(
                 dev,
                 g_pickup_handle,
                 new_real);
+            LOGI("activate pickup handle=%d -> rc=%d", g_pickup_handle, r);
+            if (rc == 0) rc = r;
+        }
 
-        if (rc != 0) {
+        if (g_tilt_handle >= 0) {
+            int r = g_orig_activate(
+                dev,
+                g_tilt_handle,
+                new_real);
+            LOGI("activate tilt handle=%d -> rc=%d", g_tilt_handle, r);
+        }
+
+        if (g_fod_handle >= 0) {
+            int r = g_orig_activate(
+                dev,
+                g_fod_handle,
+                new_real);
+            LOGI("activate fod handle=%d -> rc=%d", g_fod_handle, r);
+        }
+
+        if (g_aod_handle >= 0) {
+            int r = g_orig_activate(
+                dev,
+                g_aod_handle,
+                new_real);
+            LOGI("activate aod handle=%d -> rc=%d", g_aod_handle, r);
+        }
+
+        if (g_smd_handle >= 0) {
+            int r = g_orig_activate(
+                dev,
+                g_smd_handle,
+                new_real);
+            LOGI("activate smd handle=%d -> rc=%d", g_smd_handle, r);
+        }
+
+        if (g_hand_handle >= 0) {
+            int r = g_orig_activate(
+                dev,
+                g_hand_handle,
+                new_real);
+            LOGI("activate hand handle=%d -> rc=%d", g_hand_handle, r);
+        }
+
+        if (rc != 0 && g_pickup_handle >= 0) {
             g_pickup_enabled =
                 old_pickup;
 
@@ -540,13 +651,18 @@ static int compat_activate(
         }
     }
 
-    LOGI("activate handle=%d enabled=%d pickupLogical=%d synthLogical=%d real=%d rc=%d",
+    LOGI("activate handle=%d enabled=%d pickupLogical=%d synthLogical=%d real=%d rc=%d (tilt=%d fod=%d aod=%d smd=%d hand=%d)",
          handle,
          enabled,
          g_pickup_enabled,
          g_synth_enabled,
          new_real,
-         rc);
+         rc,
+         g_tilt_handle,
+         g_fod_handle,
+         g_aod_handle,
+         g_smd_handle,
+         g_hand_handle);
 
     pthread_mutex_unlock(&g_lock);
 
@@ -563,6 +679,22 @@ static int compat_setDelay(
 
     if (handle ==
         g_synth_handle) {
+
+        if (g_tilt_handle >= 0) {
+            g_orig_setDelay(dev, g_tilt_handle, ns);
+        }
+        if (g_fod_handle >= 0) {
+            g_orig_setDelay(dev, g_fod_handle, ns);
+        }
+        if (g_aod_handle >= 0) {
+            g_orig_setDelay(dev, g_aod_handle, ns);
+        }
+        if (g_smd_handle >= 0) {
+            g_orig_setDelay(dev, g_smd_handle, ns);
+        }
+        if (g_hand_handle >= 0) {
+            g_orig_setDelay(dev, g_hand_handle, ns);
+        }
 
         handle =
             g_pickup_handle;
@@ -586,6 +718,22 @@ static int compat_batch(
 
     if (handle ==
         g_synth_handle) {
+
+        if (g_tilt_handle >= 0) {
+            g_orig_batch(dev, g_tilt_handle, flags, sampling_ns, latency_ns);
+        }
+        if (g_fod_handle >= 0) {
+            g_orig_batch(dev, g_fod_handle, flags, sampling_ns, latency_ns);
+        }
+        if (g_aod_handle >= 0) {
+            g_orig_batch(dev, g_aod_handle, flags, sampling_ns, latency_ns);
+        }
+        if (g_smd_handle >= 0) {
+            g_orig_batch(dev, g_smd_handle, flags, sampling_ns, latency_ns);
+        }
+        if (g_hand_handle >= 0) {
+            g_orig_batch(dev, g_hand_handle, flags, sampling_ns, latency_ns);
+        }
 
         handle =
             g_pickup_handle;
@@ -724,7 +872,40 @@ static int compat_poll(
              ev.sensor ==
                 g_pickup_handle);
 
-        if (!is_pickup) {
+        int is_tilt =
+            (g_tilt_handle >= 0 &&
+             ev.sensor ==
+                g_tilt_handle);
+
+        int is_fod =
+            (g_fod_handle >= 0 &&
+             ev.sensor ==
+                g_fod_handle);
+
+        int is_aod =
+            (g_aod_handle >= 0 &&
+             ev.sensor ==
+                g_aod_handle);
+
+        int is_smd =
+            (g_smd_handle >= 0 &&
+             ev.sensor ==
+                g_smd_handle);
+
+        int is_hand =
+            (g_hand_handle >= 0 &&
+             ev.sensor ==
+                g_hand_handle);
+
+        int is_our_sensor =
+            is_pickup ||
+            is_tilt ||
+            is_fod ||
+            is_aod ||
+            is_smd ||
+            is_hand;
+
+        if (!is_our_sensor) {
             if (written < count)
                 out[written++] = ev;
 
@@ -732,55 +913,92 @@ static int compat_poll(
         }
 
         /*
-         * Preserve the real Xiaomi event only
+         * Preserve the real Xiaomi pickup event only
          * if some real client actually enabled
          * the Xiaomi pickup sensor.
          */
-        if (pickup_logical &&
+        if (is_pickup && pickup_logical &&
             written < count) {
 
             out[written++] = ev;
         }
 
         /*
-         * Rodin pickup:
-         *   value 1.0 = pickup
+         * ULTRA-SENSITIVE ZERO-EFFORT PICKUP ENGINE:
+         *
+         * Bridges:
+         * 1) Xiaomi Pickup sensor (data[0] > 0.0f)
+         * 2) MediaTek Tilt detector (data[0] > 0.0f)
+         * 3) Xiaomi FOD Wakeup (fires on finger approach / pickup)
+         * 4) Xiaomi AOD Wakeup (fires on pickup / movement)
+         * 5) MediaTek Significant Motion Detector (fires on ANY movement off flat surface)
+         * 6) Xiaomi IMU Hand detect (fires on hand grasp)
          *
          * ColorOS synthetic 65611 expects:
          *   value 0.0 = wake/pickup callback
          */
-        if (synth_logical &&
-            ev.data[0] == 1.0f) {
+        if (synth_logical) {
+            int trigger = 0;
+            const char *src = "unknown";
 
-            sensors_event_t syn =
-                ev;
-
-            syn.sensor =
-                g_synth_handle;
-
-            syn.type =
-                OPLUS_TILT_TYPE;
-
-            memset(
-                syn.data,
-                0,
-                sizeof(syn.data));
-
-            if (written < count) {
-                out[written++] =
-                    syn;
-            } else {
-                queue_pending_locked(
-                    &syn);
+            if (is_pickup && ev.data[0] > 0.0f) {
+                trigger = 1;
+                src = "pickup";
+            } else if (is_tilt && ev.data[0] > 0.0f) {
+                trigger = 1;
+                src = "tilt";
+            } else if (is_fod) {
+                trigger = 1;
+                src = "fod_wakeup";
+            } else if (is_aod) {
+                trigger = 1;
+                src = "aod_wakeup";
+            } else if (is_smd && ev.data[0] > 0.0f) {
+                trigger = 1;
+                src = "smd";
+                // SMD is one-shot; re-arm it
+                if (dev && g_orig_activate) {
+                    g_orig_activate(dev, g_smd_handle, 1);
+                }
+            } else if (is_hand && ev.data[0] > 0.0f) {
+                trigger = 1;
+                src = "imu_hand";
             }
 
-            if (g_synth_event_log_count <
-                20) {
+            if (trigger) {
+                sensors_event_t syn =
+                    ev;
 
-                LOGI("pickup -> synthetic 65611 value=0 ts=%" PRId64,
-                     syn.timestamp);
+                syn.sensor =
+                    g_synth_handle;
 
-                ++g_synth_event_log_count;
+                syn.type =
+                    OPLUS_TILT_TYPE;
+
+                memset(
+                    syn.data,
+                    0,
+                    sizeof(syn.data));
+
+                if (written < count) {
+                    out[written++] =
+                        syn;
+                } else {
+                    queue_pending_locked(
+                        &syn);
+                }
+
+                if (g_synth_event_log_count <
+                    100) {
+
+                    LOGI("instant pickup trigger (src=%s handle=%d val=%.1f) -> synthetic 65611 value=0 ts=%" PRId64,
+                         src,
+                         ev.sensor,
+                         ev.data[0],
+                         syn.timestamp);
+
+                    ++g_synth_event_log_count;
+                }
             }
         }
     }

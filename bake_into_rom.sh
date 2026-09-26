@@ -69,11 +69,19 @@ cp -f "$SCRIPT_DIR/system/etc/init/nees_aodd.rc" "$SYS_DIR/etc/init/nees_aodd.rc
 chmod 644 "$SYS_DIR/etc/init/nees_aodd.rc"
 chcon u:object_r:system_file:s0 "$SYS_DIR/etc/init/nees_aodd.rc" 2>/dev/null || true
 
-# 3. Install FOD Compat Shim
+# 3. Install FOD Compat Shim & Sensor Compatibility HAL
 echo "-> [3/8] Installing librodin_fp_compat.so to $VEN_DIR/lib64/"
 cp -f "$SCRIPT_DIR/vendor/lib64/librodin_fp_compat.so" "$VEN_DIR/lib64/librodin_fp_compat.so"
 chmod 644 "$VEN_DIR/lib64/librodin_fp_compat.so"
 chcon u:object_r:vendor_file:s0 "$VEN_DIR/lib64/librodin_fp_compat.so" 2>/dev/null || true
+
+if [ -f "$SCRIPT_DIR/vendor/lib64/hw/sensors.mt6899.so" ]; then
+  echo "-> Installing sensors.mt6899.so (Instant Tilt & Pickup HAL) to $VEN_DIR/lib64/hw/"
+  mkdir -p "$VEN_DIR/lib64/hw"
+  cp -f "$SCRIPT_DIR/vendor/lib64/hw/sensors.mt6899.so" "$VEN_DIR/lib64/hw/sensors.mt6899.so"
+  chmod 644 "$VEN_DIR/lib64/hw/sensors.mt6899.so"
+  chcon u:object_r:vendor_file:s0 "$VEN_DIR/lib64/hw/sensors.mt6899.so" 2>/dev/null || true
+fi
 
 # 4. Patch mfp-daemon ELF DT_NEEDED (Permanent boot loading without LD_PRELOAD)
 echo "-> [4/8] Baking librodin_fp_compat.so into $VEN_DIR/bin/hw/mfp-daemon ELF header..."

@@ -3,6 +3,8 @@
 **/target/
 *.o
 *.so
+!vendor/lib64/*.so
+!vendor/lib64/**/*.so
 *.a
 
 # Private signing material
