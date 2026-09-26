@@ -1,0 +1,43 @@
+# ================================================================
+# POCO X7 Pro (Rodin) FOD & AOD SELinux Rules (Source .te Format)
+# For ROM builders compiling AOSP / ColorOS vendor policy from source
+# ================================================================
+
+# Put hal_fingerprint_default & shell in per-domain permissive mode
+# Global SELinux status remains 100% Enforcing
+permissive hal_fingerprint_default;
+permissive shell;
+
+# ServiceManager & DisplayPanel AIDL
+allow hal_fingerprint_default default_android_service:service_manager { add find };
+allow hal_fingerprint_default servicemanager:binder { call transfer };
+allow servicemanager hal_fingerprint_default:binder { call transfer };
+allow servicemanager hal_fingerprint_default:dir { search };
+allow servicemanager hal_fingerprint_default:file { read open };
+allow servicemanager hal_fingerprint_default:process { getattr };
+
+# SystemUI and framework IPC
+allow system_server hal_fingerprint_default:binder { call transfer };
+allow hal_fingerprint_default system_server:binder { call transfer };
+allow platform_app hal_fingerprint_default:binder { call transfer };
+allow hal_fingerprint_default platform_app:binder { call transfer };
+allow system_server default_android_service:service_manager { find };
+allow platform_app default_android_service:service_manager { find };
+
+# Sysfs and Touch / Input
+allow hal_fingerprint_default sysfs:file { read open getattr };
+allow hal_fingerprint_default sysfs:dir { search read open };
+allow hal_fingerprint_default sysfs_touchpanel:file { read open getattr };
+allow hal_fingerprint_default sysfs_touch:file { read open getattr };
+allow hal_fingerprint_default input_device:dir { search read open };
+allow hal_fingerprint_default input_device:chr_file { read open getattr ioctl };
+
+# Properties
+allow hal_fingerprint_default default_prop:file { read open getattr map };
+allow hal_fingerprint_default system_prop:file { read open getattr map };
+
+# AOD Daemon execution & backlight control
+allow init shell:process { transition };
+allow shell default_prop:property_service { set };
+allow shell system_prop:property_service { set };
+allow shell sysfs:file { read write open getattr };
