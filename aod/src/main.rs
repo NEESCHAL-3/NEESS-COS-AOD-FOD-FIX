@@ -185,6 +185,17 @@ fn display_really_awake() -> bool {
         || text.contains("Wakefulness: Awake")
 }
 
+fn energy_saving_enabled() -> bool {
+    let output = match Command::new("/system/bin/settings")
+        .args(["get", "secure", "Setting_AodUserEnergySavingSet"])
+        .output()
+    {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        Err(_) => return false,
+    };
+    output == "1"
+}
+
 fn main() {
     let verify_only = std::env::args().any(|arg| arg == "--verify-only");
 
@@ -279,8 +290,12 @@ fn main() {
             if line.contains("onEnergySavingNotifyHide")
                 && !fp_only_phase
             {
-                pending_energy_hide = true;
-                klog("power-saving AOD hide detected");
+                if energy_saving_enabled() {
+                    pending_energy_hide = true;
+                    klog("power-saving AOD hide detected");
+                } else {
+                    klog("ignoring energy-saving hide (all-day AOD active)");
+                }
             }
 
             // 4. TRANSITION TO OFF (AOD hides / panel turns off)

@@ -1,14 +1,19 @@
 ; ================================================================
 ; POCO X7 Pro (Rodin) FOD & AOD SELinux Rules (CIL Format)
 ; Target file: /vendor/etc/selinux/vendor_sepolicy.cil
-;
-; Case 1 (Recommended): Hybrid Enforcing
-; - Whole ROM is globally Enforcing (getenforce = Enforcing)
-; - hal_fingerprint_default is in per-domain permissive mode
-; - ZERO compilation errors, ZERO bootloops
-;
-; If you want 100% Pure Strict Enforcing with no permissive domains,
-; use vendor_sepolicy_strict.cil.append instead.
+; Mode: 100% Strict Enforcing (Zero Permissive Domains)
 ; ================================================================
 
-(typepermissive hal_fingerprint_default)
+; ===== ColorWave AIDL SHM =====
+(allow hal_audio_default shell_data_file_202404 (dir (search read open getattr write add_name remove_name rename)))
+(allow hal_audio_default shell_data_file_202404 (file (read write create open getattr setattr unlink rename map)))
+(allow mtk_hal_audio shell_data_file_202404 (dir (search read open getattr write add_name remove_name rename)))
+(allow mtk_hal_audio shell_data_file_202404 (file (read write create open getattr setattr unlink rename map)))
+
+; ===== Pure Strict Enforcing FOD Rules =====
+(allow hal_fingerprint_default sysfs_202404 (file (read open getattr)))
+(allow hal_fingerprint_default sysfs_202404 (dir (search read open)))
+(allow hal_fingerprint_default system_server_202404 (binder (call transfer)))
+(allow system_server_202404 hal_fingerprint_default (binder (call transfer)))
+(allow hal_fingerprint_default default_prop_202404 (file (read open getattr map)))
+(allow hal_fingerprint_default system_prop_202404 (file (read open getattr map)))

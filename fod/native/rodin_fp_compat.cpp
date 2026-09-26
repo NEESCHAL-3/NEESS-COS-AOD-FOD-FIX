@@ -777,10 +777,12 @@ static void handleFodUp(const char* source) {
     gPendingFodDown.store(false);
     gFodSessionTerminal.store(false);
 
-    // Keep Xiaomi TouchEnable:1 / FodEn:2 armed ALWAYS. Never disable touch.
-    xiaomiConditionUpdate(4, 1);
-    xiaomiConditionUpdate(1, 1);
-    setTouchFeature(0, 10, 1);
+    // Re-arm touch only if a biometric operation is still active
+    if (gFpOperation.load() != FP_OP_NONE) {
+        xiaomiConditionUpdate(4, 1);
+        xiaomiConditionUpdate(1, 1);
+        setTouchFeature(0, 10, 1);
+    }
 
     const bool listener = gTouchListener.load();
     LOGI("PHYSICAL FOD UP (%s) listener=%d", source, listener);
@@ -1338,11 +1340,11 @@ static binder_status_t oplusPanelOnTransact(
 
             if (feature == OPLUS_FEATURE_HBM_CONTROL && value == 0) {
                 gFodSessionTerminal.store(false);
-                // Keep touch armed
-                xiaomiConditionUpdate(4, 1);
-                xiaomiConditionUpdate(1, 1);
-                setTouchFeature(0, 10, 1);
-                LOGI("AUTH terminal HBM ACK - touch kept armed");
+                // ColorOS requests HBM OFF -> shut down LHBM immediately!
+                setTouchFeature(0, 10, 0);
+                xiaomiConditionUpdate(4, 0);
+                xiaomiConditionUpdate(1, 0);
+                LOGI("AUTH terminal HBM ACK - LHBM shut down instantly");
             }
 
             LOGI("OplusPanel FOD display feature=%d value=%d ACK only",
@@ -1454,9 +1456,10 @@ static void registerOplusPanelCompat() {
                 }
 
                 /*
-                 * Oplus interface is a stable vendor AIDL interface.
+                 * Register under full service name.
+                 * DO NOT mark VINTF stability (service is not in vendor VINTF manifest,
+                 * marking it causes ServiceManager to reject registration with -3).
                  */
-
                 binder_status_t rc =
                     gAddService(
                         binder,
@@ -1477,7 +1480,7 @@ static void registerOplusPanelCompat() {
                      attempt + 1,
                      rc);
 
-                usleep(250000);
+                usleep(200000);
             }
 
             LOGE("OplusPanel registration FAILED");
@@ -1487,34 +1490,7 @@ static void registerOplusPanelCompat() {
 
 __attribute__((constructor))
 static void rodinOplusPanelCompatInit() {
-
-    std::thread([]() {
-
-        /*
-         * mfp-daemon starts before the late-start AOD helper on
-         * some boots.  Never block mfp-daemon startup.
-         *
-         * Wait for the independently verified NEES4 runtime token.
-         */
-        for (int attempt = 0;
-             attempt < 300;
-             ++attempt) {
-
-            if (sharedAuthorizationReady()) {
-                LOGI(
-                    "NEES4 runtime authorization OK");
-
-                registerOplusPanelCompat();
-                return;
-            }
-
-            usleep(100000);
-        }
-
-        LOGE(
-            "NEES4 runtime authorization timeout; "
-            "OplusPanel disabled");
-    }).detach();
+    registerOplusPanelCompat();
 }
 
 /* ===== END RODIN OPLUS DISPLAY PANEL COMPAT ===== */
@@ -1844,6 +1820,8 @@ AIBinder_Class* AIBinder_Class_define(
             "hooking %s NORMAL-FOD ONLY",
             descriptor);
 
+        registerOplusPanelCompat();
+
         return gRealDefine(
             descriptor,
             onCreate,
@@ -2093,9 +2071,14 @@ rodinBpOnAuthSucceeded(
         return ::ndk::ScopedAStatus::fromStatus(STATUS_UNKNOWN_TRANSACTION);
     }
 
-    LOGI("AUTH SUCCESS: enrollmentId=%d -> arming unlock animation & QuickLaunch latch", enrollmentId);
+    LOGI("AUTH SUCCESS: enrollmentId=%d -> immediately turning off LHBM & arming unlock animation", enrollmentId);
     gAuthSucceededTime = std::chrono::steady_clock::now();
     gAuthSucceededFlag.store(true);
+
+    // Instantly shut down Xiaomi LHBM so optical highlight does not linger while finger is held
+    setTouchFeature(0, 10, 0);
+    xiaomiConditionUpdate(4, 0);
+    xiaomiConditionUpdate(1, 0);
 
     if (sharedAuthorizationReady()) {
         // Guarantee isTouchDownNow is asserted in ColorOS SystemUI

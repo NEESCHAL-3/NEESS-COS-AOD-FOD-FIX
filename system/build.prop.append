@@ -1,0 +1,5 @@
+# POCO X7 Pro (Rodin) ColorOS FOD & AOD Optimizations
+ro.nees.fod.compat=1
+persist.vendor.sys.fp.fod.lhbmoffafterresult=1
+persist.sys.fp.fod.screenoff=true
+ro.oplus.aod.fod.support=true
