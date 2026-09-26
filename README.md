@@ -130,18 +130,20 @@ Output: `aod/target/aarch64-unknown-linux-musl/release/nees-rodin-aodd`
 * Copy `nees_aodd` -> `/system/bin/nees_aodd` (`0755`, `u:object_r:system_file:s0`)
 * Copy `nees_aodd.rc` -> `/system/etc/init/nees_aodd.rc` (`0644`, `u:object_r:system_file:s0`)
 * Append to `/system/build.prop`:
-  ```properties
-  ro.nees.fod.compat=1
-  sys.nees4.authorized=1
-  persist.sys.rodin.aod_keep_doze=1
-  ro.oplus.aod.fod.support=true
-  ```
+
+```properties
+sys.nees4.authorized=1
+ro.nees.fod.compat=1
+persist.sys.rodin.aod_keep_doze=1
+ro.oplus.aod.fod.support=true
+```
 
 #### Vendor Partition (`vendor/`)
 * Copy `librodin_fp_compat.so` -> `/vendor/lib64/librodin_fp_compat.so` (`0644`, `u:object_r:vendor_file:s0`)
 * Copy `zz_rodin_fp_compat.rc` -> `/vendor/etc/init/zz_rodin_fp_compat.rc` (`0644`, `u:object_r:vendor_configs_file:s0`)
 * Append to `vendor.prop` (or `/vendor/build.prop`):
-  ```properties
+
+```properties
 vendor.fingerprint.aidl.support=1
 
 # Rodin Oplus FOD UI gate
@@ -183,7 +185,8 @@ persist.vendor.sys.fp.heartbeat=true
 # Low brightness FOD thresholds
 ro.hardware.fp.fod.lowlight.lux.threshold=3
 ro.hardware.fp.fod.lowlight.brightness.threshold=411
-  ```
+```
+
 * Append `sepolicy/vendor_sepolicy.cil.append` to `/vendor/etc/selinux/vendor_sepolicy.cil`.
 * **Important:** Remove `/vendor/etc/selinux/precompiled_sepolicy` and its `.sha256` so Android `init` dynamically compiles your updated CIL rules on first boot.
 

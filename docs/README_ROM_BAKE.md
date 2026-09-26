@@ -98,7 +98,8 @@ The script automatically:
    * SELinux context: `u:object_r:vendor_configs_file:s0`
 3. **Append Vendor Properties:**
    Append these lines to `vendor.prop` (or `[ROM]/vendor/build.prop`):
-   ```properties
+
+```properties
 vendor.fingerprint.aidl.support=1
 
 # Rodin Oplus FOD UI gate
@@ -140,7 +141,7 @@ persist.vendor.sys.fp.heartbeat=true
 # Low brightness FOD thresholds
 ro.hardware.fp.fod.lowlight.lux.threshold=3
 ro.hardware.fp.fod.lowlight.brightness.threshold=411
-   ```
+```
 
 ---
 
