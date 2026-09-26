@@ -1,0 +1,3 @@
+# POCO X7 Pro (Rodin) FOD Compat Shim & Init Script
+/vendor/lib64/librodin_fp_compat\.so    u:object_r:vendor_file:s0
+/vendor/etc/init/zz_rodin_fp_compat\.rc u:object_r:vendor_configs_file:s0

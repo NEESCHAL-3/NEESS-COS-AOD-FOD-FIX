@@ -143,6 +143,28 @@ Output: `aod/target/aarch64-unknown-linux-musl/release/nees-rodin-aodd`
 * Append `sepolicy/vendor_sepolicy.cil.append` to `/vendor/etc/selinux/vendor_sepolicy.cil`.
 * **Important:** Remove `/vendor/etc/selinux/precompiled_sepolicy` and its `.sha256` so Android `init` dynamically compiles your updated CIL rules on first boot.
 
+### SELinux File Contexts & Permissions Table
+
+| File Path in ROM | Permissions | Owner | SELinux Context | Description |
+|---|---|---|---|---|
+| `/system/bin/nees_aodd` | `0755` (`rwxr-xr-x`) | `root:root` | `u:object_r:system_file:s0` | AOD & SOFOD daemon executable |
+| `/system/etc/init/nees_aodd.rc` | `0644` (`rw-r--r--`) | `root:root` | `u:object_r:system_file:s0` | Init service definition (`u:r:shell:s0`) |
+| `/vendor/lib64/librodin_fp_compat.so` | `0644` (`rw-r--r--`) | `root:root` | `u:object_r:vendor_file:s0` | Fingerprint & panel compat shim |
+| `/vendor/etc/init/zz_rodin_fp_compat.rc` | `0644` (`rw-r--r--`) | `root:root` | `u:object_r:vendor_configs_file:s0` | Hardware hook & Goodix/FocalTech permissions |
+| `/vendor/etc/selinux/vendor_sepolicy.cil` | `0644` (`rw-r--r--`) | `root:root` | `u:object_r:vendor_sepolicy_file:s0` | Treble vendor CIL policy |
+
+#### `file_contexts` Entries for Image Repackers (`erofs` / `ext4` / `e2fsdroid`)
+* **`plat_file_contexts` (System):**
+  ```text
+  /system/bin/nees_aodd                   u:object_r:system_file:s0
+  /system/etc/init/nees_aodd\.rc          u:object_r:system_file:s0
+  ```
+* **`vendor_file_contexts` (Vendor):**
+  ```text
+  /vendor/lib64/librodin_fp_compat\.so    u:object_r:vendor_file:s0
+  /vendor/etc/init/zz_rodin_fp_compat\.rc u:object_r:vendor_configs_file:s0
+  ```
+
 ---
 
 ## Post-Boot Verification

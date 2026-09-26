@@ -50,29 +50,33 @@ echo "Vendor Root: $VEN_DIR"
 echo ""
 
 # 1. Install AOD Daemon
-echo "-> [1/6] Installing nees_aodd to $SYS_DIR/bin/"
+echo "-> [1/7] Installing nees_aodd to $SYS_DIR/bin/"
 cp -f "$SCRIPT_DIR/system/bin/nees_aodd" "$SYS_DIR/bin/nees_aodd"
 chmod 755 "$SYS_DIR/bin/nees_aodd"
+chcon u:object_r:system_file:s0 "$SYS_DIR/bin/nees_aodd" 2>/dev/null || true
 
 # 2. Install AOD Init Service
-echo "-> [2/6] Installing nees_aodd.rc to $SYS_DIR/etc/init/"
+echo "-> [2/7] Installing nees_aodd.rc to $SYS_DIR/etc/init/"
 mkdir -p "$SYS_DIR/etc/init"
 cp -f "$SCRIPT_DIR/system/etc/init/nees_aodd.rc" "$SYS_DIR/etc/init/nees_aodd.rc"
 chmod 644 "$SYS_DIR/etc/init/nees_aodd.rc"
+chcon u:object_r:system_file:s0 "$SYS_DIR/etc/init/nees_aodd.rc" 2>/dev/null || true
 
 # 3. Install FOD Compat Shim
-echo "-> [3/6] Installing librodin_fp_compat.so to $VEN_DIR/lib64/"
+echo "-> [3/7] Installing librodin_fp_compat.so to $VEN_DIR/lib64/"
 cp -f "$SCRIPT_DIR/vendor/lib64/librodin_fp_compat.so" "$VEN_DIR/lib64/librodin_fp_compat.so"
 chmod 644 "$VEN_DIR/lib64/librodin_fp_compat.so"
+chcon u:object_r:vendor_file:s0 "$VEN_DIR/lib64/librodin_fp_compat.so" 2>/dev/null || true
 
 # 4. Install Fingerprint Hook & Node Init Script
-echo "-> [4/6] Installing zz_rodin_fp_compat.rc to $VEN_DIR/etc/init/"
+echo "-> [4/7] Installing zz_rodin_fp_compat.rc to $VEN_DIR/etc/init/"
 mkdir -p "$VEN_DIR/etc/init"
 cp -f "$SCRIPT_DIR/vendor/etc/init/zz_rodin_fp_compat.rc" "$VEN_DIR/etc/init/zz_rodin_fp_compat.rc"
 chmod 644 "$VEN_DIR/etc/init/zz_rodin_fp_compat.rc"
+chcon u:object_r:vendor_configs_file:s0 "$VEN_DIR/etc/init/zz_rodin_fp_compat.rc" 2>/dev/null || true
 
 # 5. Inject SELinux CIL Rules & Handle precompiled_sepolicy
-echo "-> [5/6] Injecting SELinux CIL rules into $VEN_DIR/etc/selinux/vendor_sepolicy.cil..."
+echo "-> [5/7] Injecting SELinux CIL rules into $VEN_DIR/etc/selinux/vendor_sepolicy.cil..."
 CIL_TARGET="$VEN_DIR/etc/selinux/vendor_sepolicy.cil"
 if [ -f "$CIL_TARGET" ]; then
   if ! grep -q "typepermissive hal_fingerprint_default" "$CIL_TARGET"; then
@@ -98,8 +102,26 @@ if [ -f "$PRECOMPILED" ]; then
   echo "   [OK] precompiled_sepolicy handled."
 fi
 
-# 6. Append Properties to build.prop
-echo "-> [6/6] Injecting properties into $SYS_DIR/build.prop..."
+# 6. Update SELinux file_contexts if present in unpacked partitions
+echo "-> [6/7] Updating SELinux file_contexts for image repackers (erofs/ext4)..."
+VEN_FC="$VEN_DIR/etc/selinux/vendor_file_contexts"
+if [ -f "$VEN_FC" ]; then
+  if ! grep -q "librodin_fp_compat" "$VEN_FC"; then
+    cat "$SCRIPT_DIR/sepolicy/vendor_file_contexts.append" >> "$VEN_FC"
+    echo "   [OK] Appended labels to $VEN_FC"
+  fi
+fi
+
+SYS_FC="$SYS_DIR/etc/selinux/plat_file_contexts"
+if [ -f "$SYS_FC" ]; then
+  if ! grep -q "nees_aodd" "$SYS_FC"; then
+    cat "$SCRIPT_DIR/sepolicy/plat_file_contexts.append" >> "$SYS_FC"
+    echo "   [OK] Appended labels to $SYS_FC"
+  fi
+fi
+
+# 7. Append Properties to build.prop
+echo "-> [7/7] Injecting properties into $SYS_DIR/build.prop..."
 PROP_TARGET="$SYS_DIR/build.prop"
 if [ -f "$PROP_TARGET" ]; then
   if ! grep -q "ro.nees.fod.compat" "$PROP_TARGET"; then
@@ -116,8 +138,9 @@ echo " [SUCCESS] ROM successfully baked with TEST 4.0 FOD & AOD Fixes!"
 echo "================================================================"
 echo "Repack your ROM partitions. On first boot, the phone will:"
 echo " 1. Run global SELinux in 100% Enforcing mode (passes CTS/Integrity)."
-echo " 2. Hook mfp-daemon with librodin_fp_compat.so (FOD active)."
-echo " 3. Register DisplayPanelFeature with feature 217 ACKed (Seamless & Classic AOD fixed)."
-echo " 4. Run nees_aodd with zero-fork stream loop (No watchdog crashes)."
-echo " 5. Show Screen-Off Fingerprint icon on touch/pickup."
+echo " 2. Assign exact SELinux labels to all binaries and configs."
+echo " 3. Hook mfp-daemon with librodin_fp_compat.so (FOD active)."
+echo " 4. Register DisplayPanelFeature with feature 217 ACKed (Seamless & Classic AOD fixed)."
+echo " 5. Run nees_aodd with zero-fork stream loop (No watchdog crashes)."
+echo " 6. Show Screen-Off Fingerprint icon on touch/pickup."
 echo "================================================================"
