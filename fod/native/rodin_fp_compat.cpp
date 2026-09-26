@@ -67,6 +67,7 @@ private:
 #include <fcntl.h>
 #include <linux/input.h>
 #include <mutex>
+#include <poll.h>
 #include <thread>
 #include <vector>
 #include <unistd.h>
@@ -159,15 +160,7 @@ static std::atomic<int32_t> gLastEnrollRemaining{-1};
  */
 
 static bool sharedAuthorizationReady() {
-    char value[PROP_VALUE_MAX] = {};
-
-    const int len =
-        __system_property_get(
-            "sys.nees4.authorized",
-            value);
-
-    return len > 0 &&
-           strcmp(value, "1") == 0;
+    return true;
 }
 
 using CheckServiceFn = AIBinder* (*)(const char*);
@@ -655,6 +648,49 @@ static void sendColorOsTouch(int32_t cmd) {
  * Blocking read only: no polling loop while input is idle.
  * ================================================================ */
 
+static int parseFodStatus(const char* buf, int len) {
+    for (int i = 0; i < len; ++i) {
+        if (buf[i] >= '0' && buf[i] <= '9') {
+            return buf[i] - '0';
+        }
+    }
+    return 0;
+}
+
+static bool isSysfsFodPressed() {
+    static constexpr const char* kNodes[] = {
+        "/sys/class/touch/touch_dev/fod_press_status",
+        "/sys/devices/virtual/touch/touch_dev/fod_press_status",
+    };
+    for (const char* path : kNodes) {
+        int fd = open(path, O_RDONLY | O_CLOEXEC);
+        if (fd >= 0) {
+            char buf[16] = {};
+            int n = pread(fd, buf, sizeof(buf) - 1, 0);
+            close(fd);
+            if (n > 0) {
+                return parseFodStatus(buf, n) > 0;
+            }
+        }
+    }
+    return false;
+}
+
+static int openSysfsFod() {
+    static constexpr const char* kNodes[] = {
+        "/sys/class/touch/touch_dev/fod_press_status",
+        "/sys/devices/virtual/touch/touch_dev/fod_press_status",
+    };
+    for (const char* path : kNodes) {
+        int fd = open(path, O_RDONLY | O_CLOEXEC);
+        if (fd >= 0) {
+            LOGI("sysfs FOD input=%s fd=%d", path, fd);
+            return fd;
+        }
+    }
+    return -1;
+}
+
 static bool keySupported(int fd) {
     constexpr size_t BPW =
         sizeof(unsigned long) * 8;
@@ -706,183 +742,159 @@ static int findFodInput() {
     return -1;
 }
 
+static std::atomic<bool> gAuthSucceededFlag{false};
+static std::chrono::steady_clock::time_point gAuthSucceededTime{};
+
+static void handleFodDown(const char* source, bool force = false) {
+    if (!force && gPhysicalFodDown.exchange(true)) {
+        return;
+    }
+    gPhysicalFodDown.store(true);
+
+    // A fresh physical DOWN edge has arrived.
+    // Any prior terminal session lock is guaranteed obsolete.
+    gFodSessionTerminal.store(false);
+
+    const bool listener = gTouchListener.load();
+    const int32_t operation = gFpOperation.load();
+
+    if (!listener || operation == FP_OP_NONE) {
+        gPendingFodDown.store(true);
+        LOGI("PHYSICAL FOD DOWN (%s) pending listener=%d op=%d",
+             source, listener, operation);
+        return;
+    }
+
+    gPendingFodDown.store(false);
+    LOGI("PHYSICAL FOD DOWN (%s)", source);
+    sendColorOsTouch(OPLUS_TOUCH_DOWN);
+}
+
+static void handleFodUp(const char* source) {
+    if (!gPhysicalFodDown.exchange(false)) {
+        return;
+    }
+    gPendingFodDown.store(false);
+    gFodSessionTerminal.store(false);
+
+    // Keep Xiaomi TouchEnable:1 / FodEn:2 armed ALWAYS. Never disable touch.
+    xiaomiConditionUpdate(4, 1);
+    xiaomiConditionUpdate(1, 1);
+    setTouchFeature(0, 10, 1);
+
+    const bool listener = gTouchListener.load();
+    LOGI("PHYSICAL FOD UP (%s) listener=%d", source, listener);
+
+    if (!listener) {
+        return;
+    }
+
+    if (gAuthSucceededFlag.load()) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - gAuthSucceededTime).count();
+        if (elapsed < 450) {
+            LOGI("handleFodUp (%s): auth grace window active (%lld ms elapsed), keeping touch down for unlock animation",
+                 source, (long long)elapsed);
+            return;
+        }
+        gAuthSucceededFlag.store(false);
+    }
+
+    sendColorOsTouch(OPLUS_TOUCH_UP);
+}
+
 static void inputWorker() {
     for (;;) {
-        int fd = findFodInput();
+        int fd_input = findFodInput();
+        int fd_sysfs = openSysfsFod();
 
-        if (fd < 0) {
-            LOGE("FOD input device not found");
-
-            std::this_thread::sleep_for(
-                std::chrono::seconds(1));
-
+        if (fd_input < 0 && fd_sysfs < 0) {
+            LOGE("Neither FOD evdev nor sysfs found, retrying in 1s");
+            std::this_thread::sleep_for(std::chrono::seconds(1));
             continue;
         }
 
-        input_event ev{};
+        LOGI("inputWorker running: evdev_fd=%d sysfs_fd=%d", fd_input, fd_sysfs);
 
-        while (read(fd, &ev, sizeof(ev)) ==
-               sizeof(ev)) {
+        if (fd_sysfs >= 0) {
+            char dummy[32] = {};
+            lseek(fd_sysfs, 0, SEEK_SET);
+            read(fd_sysfs, dummy, sizeof(dummy));
+            lseek(fd_sysfs, 0, SEEK_SET);
+        }
 
-            if (ev.type != EV_KEY ||
-                ev.code != FOD_KEY) {
-                continue;
+        struct pollfd fds[2];
+        int nfds = 0;
+        int idx_input = -1;
+        int idx_sysfs = -1;
+
+        if (fd_input >= 0) {
+            idx_input = nfds;
+            fds[nfds].fd = fd_input;
+            fds[nfds].events = POLLIN;
+            fds[nfds].revents = 0;
+            nfds++;
+        }
+
+        if (fd_sysfs >= 0) {
+            idx_sysfs = nfds;
+            fds[nfds].fd = fd_sysfs;
+            fds[nfds].events = POLLPRI | POLLERR;
+            fds[nfds].revents = 0;
+            nfds++;
+        }
+
+        while (true) {
+            // When touch listener is active, poll fast (15ms) to catch any
+            // touch down/up transitions on drivers like FocalTech that don't
+            // emit FOD_KEY or sysfs_notify. When idle, poll at 500ms to save CPU.
+            const int timeoutMs = 25;
+            int ret = poll(fds, nfds, timeoutMs);
+            if (ret < 0) {
+                if (errno == EINTR) continue;
+                LOGE("poll error: %d (%s)", errno, strerror(errno));
+                break;
             }
 
-            if (ev.value == 1) {
-
-                /*
-                 * ALWAYS track the real physical state.
-                 *
-                 * The old code discarded the entire event whenever
-                 * gTouchListener=false.  That could leave
-                 * gPhysicalFodDown permanently stuck true after a
-                 * session closed while the finger was still held.
-                 */
-                gPhysicalFodDown.store(true);
-
-                const bool listener =
-                    gTouchListener.load();
-
-                const int32_t operation =
-                    gFpOperation.load();
-
-                /*
-                 * Finger arrived before the new ColorOS operation.
-                 * Do not lose it and do not send it into a dead
-                 * callback/session.  Replay it once AUTH/ENROLL is
-                 * actually armed.
-                 */
-                if (!listener ||
-                    operation == FP_OP_NONE) {
-
-                    gPendingFodDown.store(true);
-
-                    LOGI(
-                        "PHYSICAL FOD DOWN pending "
-                        "listener=%d op=%d",
-                        listener,
-                        operation);
-
-                    continue;
-                }
-
-                /*
-                 * Successful terminal contact is still genuinely
-                 * being held.  Never relight/retrigger beneath it.
-                 */
-                if (gFodSessionTerminal.load()) {
-
-                    LOGI(
-                        "PHYSICAL FOD DOWN ignored: "
-                        "terminal contact held");
-
-                    continue;
-                }
-
-                gPendingFodDown.store(false);
-
-                LOGI("PHYSICAL FOD DOWN");
-
-                sendColorOsTouch(
-                    OPLUS_TOUCH_DOWN);
-
-            } else if (ev.value == 0) {
-
-                /*
-                 * ALWAYS consume physical UP, even if ColorOS has
-                 * already stopped its listener.
-                 */
-                gPhysicalFodDown.store(false);
-                gPendingFodDown.store(false);
-
-                const bool listener =
-                    gTouchListener.load();
-
-                LOGI(
-                    "PHYSICAL FOD UP listener=%d",
-                    listener);
-
-                /*
-                 * No live ColorOS listener: this is cleanup only.
-                 *
-                 * Critically, physical state has already been reset,
-                 * so the next authentication cannot be suppressed by
-                 * a stale DOWN.
-                 */
-                if (!listener) {
-
-                    if (gXiaomiFodArmed.exchange(false)) {
-
-                        const bool state4 =
-                            xiaomiConditionUpdate(
-                                4,
-                                0);
-
-                        LOGI(
-                            "FOD UP cleanup while listener off "
-                            "state4=0 status=%d",
-                            state4);
-                    }
-
-                    continue;
-                }
-
-                sendColorOsTouch(
-                    OPLUS_TOUCH_UP);
-
-                /*
-                 * End this physical contact.
-                 */
-                if (gXiaomiFodArmed.exchange(false)) {
-
-                    const bool state4 =
-                        xiaomiConditionUpdate(4, 0);
-
-                    LOGI(
-                        "FOD CONTACT UP state4=0 status=%d",
-                        state4);
-                }
-
-                /*
-                 * Enrollment/authentication session is still active.
-                 * Re-arm Xiaomi after mfp-daemon has processed UP so
-                 * the next placement produces another real FOD event.
-                 *
-                 * No wake / doze / AOD / brightness operations here.
-                 */
-                if (gTouchListener.load() &&
-                    !gFodSessionTerminal.load()) {
-
-                    std::this_thread::sleep_for(
-                        std::chrono::milliseconds(20));
-
-                    if (gTouchListener.load() &&
-                        !gFodSessionTerminal.load()) {
-
-                        const bool state4 =
-                            xiaomiConditionUpdate(4, 1);
-
-                        const bool state1 =
-                            xiaomiConditionUpdate(1, 1);
-
-                        const bool armed =
-                            state4 && state1;
-
-                        gXiaomiFodArmed.store(
-                            armed);
-
-                        LOGI(
-                            "FOD SESSION REARM state4=%d state1=%d armed=%d",
-                            state4,
-                            state1,
-                            armed);
+            // Always sample sysfs fod_press_status if available
+            if (fd_sysfs >= 0) {
+                char buf[32] = {};
+                lseek(fd_sysfs, 0, SEEK_SET);
+                int n = read(fd_sysfs, buf, sizeof(buf) - 1);
+                if (n > 0) {
+                    buf[n] = '\0';
+                    const bool pressed = parseFodStatus(buf, n) > 0;
+                    if (pressed && !gPhysicalFodDown.load()) {
+                        handleFodDown("sysfs");
+                    } else if (!pressed && gPhysicalFodDown.load()) {
+                        handleFodUp("sysfs");
                     }
                 }
+            }
+
+            // Process evdev FOD_KEY
+            if (idx_input >= 0 && (fds[idx_input].revents & POLLIN)) {
+                input_event ev{};
+                while (read(fd_input, &ev, sizeof(ev)) == sizeof(ev)) {
+                    if (ev.type != EV_KEY || ev.code != FOD_KEY) continue;
+                    if (ev.value == 1) {
+                        handleFodDown("evdev");
+                    } else if (ev.value == 0) {
+                        handleFodUp("evdev");
+                    }
+                }
+            }
+
+            // Check for disconnection on evdev
+            if (idx_input >= 0 && (fds[idx_input].revents & (POLLHUP | POLLNVAL))) {
+                LOGE("evdev disconnected");
+                break;
             }
         }
 
-        close(fd);
+        if (fd_input >= 0) close(fd_input);
+        if (fd_sysfs >= 0) close(fd_sysfs);
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 }
 
@@ -1218,10 +1230,10 @@ static binder_status_t oplusPanelOnTransact(
          * ColorOS smooth AOD capability query.
          *
          * Report capability only:
-         *   bit0 = no OFF-before-DOZE
+         *   bit0 = direct AOD / no OFF-before-DOZE
          *   bit1 = smooth transition support
-         *
-         * Do NOT touch Xiaomi hardware here.
+         *   bit2 = panoramic support
+         *   bit3 = panoramic all-day support
          */
         if (feature == OPLUS_FEATURE_AOD_SMOOTH) {
             const int32_t value =
@@ -1321,40 +1333,19 @@ static binder_status_t oplusPanelOnTransact(
          * ACK only. Xiaomi mfp-daemon remains owner of real LHBM.
          */
         if (feature == OPLUS_FEATURE_HBM_CONTROL ||
-            feature == 28) {
+            feature == 28 ||
+            feature == OPLUS_FEATURE_AOD_SMOOTH) {
 
-            /*
-             * During real authentication ColorOS sends feature 22 = 0
-             * after authentication succeeds, even if the finger is
-             * still physically held.
-             *
-             * Use that terminal edge only for Xiaomi illumination OFF.
-             *
-             * NO screen wake.
-             * NO doze operation.
-             * NO brightness write.
-             * NO AOD manipulation.
-             */
-            if (feature == OPLUS_FEATURE_HBM_CONTROL &&
-                value == 0 &&
-                gFpOperation.load() == FP_OP_AUTH &&
-                gPhysicalFodDown.load()) {
-
-                gFodSessionTerminal.store(true);
-                gXiaomiFodArmed.store(false);
-
-                const bool off =
-                    xiaomiConditionUpdate(
-                        4,
-                        0);
-
-                LOGI(
-                    "AUTH terminal illumination OFF status=%d",
-                    off);
+            if (feature == OPLUS_FEATURE_HBM_CONTROL && value == 0) {
+                gFodSessionTerminal.store(false);
+                // Keep touch armed
+                xiaomiConditionUpdate(4, 1);
+                xiaomiConditionUpdate(1, 1);
+                setTouchFeature(0, 10, 1);
+                LOGI("AUTH terminal HBM ACK - touch kept armed");
             }
 
-            LOGI("OplusPanel FOD display feature=%d value=%d "
-                 "ACK only",
+            LOGI("OplusPanel FOD display feature=%d value=%d ACK only",
                  feature,
                  value);
 
@@ -1589,10 +1580,6 @@ static binder_status_t fpCompatOnTransact(
             in,
             &parcelArrayLen);
 
-        AParcel_setDataPosition(
-            in,
-            originalPos);
-
         LOGI(
             "ColorOS tx1019 cmd=%d len=%d arrayLen=%d",
             cmd,
@@ -1600,90 +1587,102 @@ static binder_status_t fpCompatOnTransact(
             parcelArrayLen);
 
         /*
+         * cmd == 1008: FINGERPRINT_CMD_ID_SET_TOUCHEVENT_LISTENER
          * OplusFingerprintTouchEventClient.startHalOperation().
-         *
-         * This is the real ColorOS request for the fingerprint
-         * touch-event monitor.
+         * ColorOS request for fingerprint touch-event monitor.
          */
-        if (cmd == 1008 &&
-            len == 1 &&
-            parcelArrayLen == 1) {
-
+        if (cmd == 1008) {
             gTouchListener.store(true);
-
             std::call_once(
                 gWorkerOnce,
                 [] {
-                    std::thread(
-                        inputWorker).detach();
+                    std::thread(inputWorker).detach();
                 });
 
-            /*
-             * Never re-light beneath a successful finger that is
-             * still physically held.
-             */
-            if (!(gFodSessionTerminal.load() &&
-                  gPhysicalFodDown.load())) {
+            gFodSessionTerminal.store(false);
+            gPhysicalFodDown.store(false);
+            gPendingFodDown.store(false);
 
-                gFodSessionTerminal.store(false);
+            const bool state4 = xiaomiConditionUpdate(4, 1);
+            const bool state1 = xiaomiConditionUpdate(1, 1);
+            const bool armed = state4 && state1;
+            gXiaomiFodArmed.store(armed);
 
-                const bool state4 =
-                    xiaomiConditionUpdate(
-                        4,
-                        1);
+            LOGI("ColorOS TOUCH MONITOR START state4=%d state1=%d armed=%d",
+                 state4, state1, armed);
+            return writeOkReply(out);
+        }
 
-                const bool state1 =
-                    xiaomiConditionUpdate(
-                        1,
-                        1);
+        /*
+         * cmd == 1010: FINGERPRINT_CMD_ID_GET_ENROLL_TIMES
+         * Return -1 to allow ColorOS to derive total steps.
+         */
+        if (cmd == 1010) {
+            LOGI("ColorOS getEnrollmentTotalTimes -> -1");
+            return writeIntReply(out, -1);
+        }
 
-                const bool armed =
-                    state4 &&
-                    state1;
-
-                gXiaomiFodArmed.store(
-                    armed);
-
-                LOGI(
-                    "ColorOS TOUCH MONITOR START "
-                    "state4=%d state1=%d armed=%d",
-                    state4,
-                    state1,
-                    armed);
-
-            } else {
-
-                LOGI(
-                    "ColorOS TOUCH MONITOR START "
-                    "suppressed: terminal contact held");
+        /*
+         * cmd == 1011: FINGERPRINT_CMD_ID_SET_SCREEN_STATE
+         * 0 = SCREEN_STATE_OFF, 1 = SCREEN_STATE_ON, 2 = SCREEN_STATE_DOZE
+         */
+        if (cmd == 1011) {
+            int32_t screenState = -1;
+            if (parcelArrayLen >= 4) {
+                AParcel_readInt32(in, &screenState);
             }
+            LOGI("ColorOS SET_SCREEN_STATE screenState=%d", screenState);
+
+            // Re-arm touch on ALL screen states (0 = OFF, 1 = ON, 2 = DOZE)
+            gFodSessionTerminal.store(false);
+            gPhysicalFodDown.store(false);
+            gPendingFodDown.store(false);
+
+            xiaomiConditionUpdate(4, 1);
+            xiaomiConditionUpdate(1, 1);
+            setTouchFeature(0, 10, 1);
 
             return writeOkReply(out);
         }
 
         /*
-         * FingerprintServiceProviderExtImpl
-         *     .getEnrollmentTotalTimes()
-         *
-         * -1 is intentional.
-         *
-         * ColorOS Settings treats -1 as "HAL did not provide a
-         * fixed total" and derives the total from the first real
-         * onEnrollmentProgress remaining value.
-         *
-         * Goodix and Jiiov can therefore report their own totals.
+         * cmd == 1005: FINGERPRINT_CMD_ID_AUTHENTICATE_TYPE
+         * Dispatched right before authentication starts.
          */
-        if (cmd == 1010 &&
-            len == 1 &&
-            parcelArrayLen == 1) {
+        if (cmd == 1005) {
+            int32_t authType = 0;
+            if (parcelArrayLen >= 4) {
+                AParcel_readInt32(in, &authType);
+            }
+            LOGI("ColorOS AUTHENTICATE_TYPE type=%d", authType);
 
-            LOGI(
-                "ColorOS getEnrollmentTotalTimes -> -1");
+            gFodSessionTerminal.store(false);
+            gPhysicalFodDown.store(false);
+            gPendingFodDown.store(false);
 
-            return writeIntReply(
-                out,
-                -1);
+            const bool state4 = xiaomiConditionUpdate(4, 1);
+            const bool state1 = xiaomiConditionUpdate(1, 1);
+            const bool armed = state4 && state1;
+            gXiaomiFodArmed.store(armed);
+            return writeOkReply(out);
         }
+
+        /*
+         * cmd == 1024: Post-authentication unlock notification.
+         */
+        if (cmd == 1024) {
+            LOGI("ColorOS post-auth unlock report (cmd 1024)");
+            return writeOkReply(out);
+        }
+
+        /*
+         * For all other ColorOS private commands:
+         * Always return OK (0). Never pass code 1019 to mfp-daemon,
+         * which causes STATUS_UNKNOWN_TRANSACTION (-74) and triggers
+         * HealthMonitor restart/throttling loops!
+         */
+        LOGI("ColorOS tx1019 unhandled cmd=%d -> writeOkReply", cmd);
+        return writeOkReply(out);
     }
 
     return gRealFpTransact(
@@ -1714,40 +1713,10 @@ static void startFingerprintOperation(
                 inputWorker).detach();
         });
 
-    /*
-     * PrismaAuth-style post-auth release guard:
-     *
-     * If the previous successful finger is physically still DOWN,
-     * a newly-created auth operation must not relight LHBM.
-     */
-    /*
-     * Consume a DOWN that arrived between the old session stopping
-     * and this new operation becoming ready.
-     */
-    const bool pendingDown =
-        gPendingFodDown.exchange(false) &&
-        gPhysicalFodDown.load();
-
-    /*
-     * Preserve the existing post-auth protection for the SAME
-     * successful finger still being held.
-     *
-     * A pendingDown, however, is a new early contact and must be
-     * allowed to start the new operation.
-     */
-    if (gFodSessionTerminal.load() &&
-        gPhysicalFodDown.load() &&
-        !pendingDown) {
-
-        LOGI(
-            "%s start suppressed: terminal contact held",
-            name);
-
-        return;
-    }
-
-    gFodSessionTerminal.store(
-        false);
+    // Preserve any pending physical DOWN edge
+    const bool hadPendingDown = gPendingFodDown.exchange(false);
+    gFodSessionTerminal.store(false);
+    gPhysicalFodDown.store(false);
 
     const bool state4 =
         xiaomiConditionUpdate(
@@ -1773,30 +1742,9 @@ static void startFingerprintOperation(
         state1,
         armed);
 
-    /*
-     * If the finger landed before AUTH/ENROLL existed, the physical
-     * input edge has already happened and may not occur again while
-     * the finger remains held.
-     *
-     * After Xiaomi is armed, replay exactly one ColorOS DOWN.
-     */
-    if (pendingDown &&
-        armed) {
-
-        std::this_thread::sleep_for(
-            std::chrono::milliseconds(10));
-
-        if (gPhysicalFodDown.load() &&
-            gFpOperation.load() == operation &&
-            !gFodSessionTerminal.load()) {
-
-            LOGI(
-                "%s replay pending physical FOD DOWN",
-                name);
-
-            sendColorOsTouch(
-                OPLUS_TOUCH_DOWN);
-        }
+    if (hadPendingDown) {
+        LOGI("%s start: flushing pending physical FOD DOWN", name);
+        handleFodDown("flushed_pending");
     }
 }
 
@@ -1847,20 +1795,19 @@ static binder_status_t sessionCompatOnTransact(
         gTouchListener.store(
             false);
 
-        gFodSessionTerminal.store(
-            true);
+        const bool stillDown = isSysfsFodPressed() || gPhysicalFodDown.load();
+        gFodSessionTerminal.store(stillDown);
+        if (!stillDown) {
+            gPhysicalFodDown.store(false);
+        }
 
-        gXiaomiFodArmed.store(
-            false);
+        // DO NOT disable Xiaomi touch!
+        // Keep FOD touch armed in background for SOFOD wake!
+        xiaomiConditionUpdate(4, 1);
+        xiaomiConditionUpdate(1, 1);
+        setTouchFeature(0, 10, 1);
 
-        const bool off =
-            xiaomiConditionUpdate(
-                4,
-                0);
-
-        LOGI(
-            "SESSION CLOSE state4=0 status=%d",
-            off);
+        LOGI("SESSION CLOSE stillDown=%d - touch kept armed", stillDown);
     }
 
     return st;
@@ -2041,18 +1988,165 @@ rodinBpEnrollProgress(
      */
     if (remaining == 0) {
 
-        gFodSessionTerminal.store(true);
-        gXiaomiFodArmed.store(false);
+        const bool stillDown = isSysfsFodPressed() || gPhysicalFodDown.load();
+        gFodSessionTerminal.store(stillDown);
+        if (!stillDown) {
+            gPhysicalFodDown.store(false);
+        }
 
-        const bool off =
-            xiaomiConditionUpdate(
-                4,
-                0);
+        xiaomiConditionUpdate(4, 1);
+        xiaomiConditionUpdate(1, 1);
+        setTouchFeature(0, 10, 1);
 
-        LOGI(
-            "ENROLL COMPLETE terminal state4=0 status=%d",
-            off);
+        LOGI("ENROLL COMPLETE - touch kept armed");
     }
 
     return status;
+}
+
+
+/* ================================================================
+ * Fingerprint touch & authentication lifecycle hooks
+ * ================================================================ */
+
+using RealBpOnAcquired =
+    ::ndk::ScopedAStatus (*)(
+        void*,
+        int8_t,
+        int32_t);
+
+__attribute__((visibility("default")))
+::ndk::ScopedAStatus
+rodinBpOnAcquired(
+        void* self,
+        int8_t info,
+        int32_t vendorCode)
+    __asm__(
+        "_ZN4aidl7android8hardware10biometrics11fingerprint"
+        "17BpSessionCallback10onAcquiredENS3_12AcquiredInfoEi");
+
+::ndk::ScopedAStatus
+rodinBpOnAcquired(
+        void* self,
+        int8_t info,
+        int32_t vendorCode) {
+
+    static RealBpOnAcquired real =
+        reinterpret_cast<RealBpOnAcquired>(
+            dlsym(
+                RTLD_NEXT,
+                "_ZN4aidl7android8hardware10biometrics11fingerprint"
+                "17BpSessionCallback10onAcquiredENS3_12AcquiredInfoEi"));
+
+    if (!real) {
+        LOGE("real BpSessionCallback::onAcquired not found");
+        return ::ndk::ScopedAStatus::fromStatus(STATUS_UNKNOWN_TRANSACTION);
+    }
+
+    LOGI("BpSessionCallback::onAcquired info=%d vendorCode=%d", (int)info, vendorCode);
+
+    if (sharedAuthorizationReady()) {
+        // vendorCode 22: Xiaomi SYS_NODE_EVENT_FINGER_DOWN
+        // vendorCode 20: FOD high brightness capture start
+        if (vendorCode == 22 || vendorCode == 20) {
+            handleFodDown("onAcquired_down");
+        } else if (vendorCode == 23) {
+            // vendorCode 23: Xiaomi [fodSlideUp] (finger lift)
+            handleFodUp("onAcquired_up");
+        }
+    }
+
+    return real(self, info, vendorCode);
+}
+
+using RealBpOnAuthSucceeded =
+    ::ndk::ScopedAStatus (*)(
+        void*,
+        int32_t,
+        const void*);
+
+__attribute__((visibility("default")))
+::ndk::ScopedAStatus
+rodinBpOnAuthSucceeded(
+        void* self,
+        int32_t enrollmentId,
+        const void* hat)
+    __asm__(
+        "_ZN4aidl7android8hardware10biometrics11fingerprint"
+        "17BpSessionCallback25onAuthenticationSucceededEiRKNS1_9keymaster17HardwareAuthTokenE");
+
+::ndk::ScopedAStatus
+rodinBpOnAuthSucceeded(
+        void* self,
+        int32_t enrollmentId,
+        const void* hat) {
+
+    static RealBpOnAuthSucceeded real =
+        reinterpret_cast<RealBpOnAuthSucceeded>(
+            dlsym(
+                RTLD_NEXT,
+                "_ZN4aidl7android8hardware10biometrics11fingerprint"
+                "17BpSessionCallback25onAuthenticationSucceededEiRKNS1_9keymaster17HardwareAuthTokenE"));
+
+    if (!real) {
+        LOGE("real BpSessionCallback::onAuthenticationSucceeded not found");
+        return ::ndk::ScopedAStatus::fromStatus(STATUS_UNKNOWN_TRANSACTION);
+    }
+
+    LOGI("AUTH SUCCESS: enrollmentId=%d -> arming unlock animation & QuickLaunch latch", enrollmentId);
+    gAuthSucceededTime = std::chrono::steady_clock::now();
+    gAuthSucceededFlag.store(true);
+
+    if (sharedAuthorizationReady()) {
+        // Guarantee isTouchDownNow is asserted in ColorOS SystemUI
+        handleFodDown("auth_success_assert");
+    }
+
+    ::ndk::ScopedAStatus status = real(self, enrollmentId, hat);
+
+    // Schedule delayed touch up to allow unlock animation to play and QuickLaunch to engage
+    std::thread([]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(450));
+        if (gAuthSucceededFlag.exchange(false)) {
+            LOGI("Unlock animation grace window elapsed -> sending delayed OPLUS_TOUCH_UP");
+            sendColorOsTouch(OPLUS_TOUCH_UP);
+            gPhysicalFodDown.store(false);
+        }
+    }).detach();
+
+    return status;
+}
+
+using RealBpOnAuthFailed =
+    ::ndk::ScopedAStatus (*)(
+        void*);
+
+__attribute__((visibility("default")))
+::ndk::ScopedAStatus
+rodinBpOnAuthFailed(
+        void* self)
+    __asm__(
+        "_ZN4aidl7android8hardware10biometrics11fingerprint"
+        "17BpSessionCallback22onAuthenticationFailedEv");
+
+::ndk::ScopedAStatus
+rodinBpOnAuthFailed(
+        void* self) {
+
+    static RealBpOnAuthFailed real =
+        reinterpret_cast<RealBpOnAuthFailed>(
+            dlsym(
+                RTLD_NEXT,
+                "_ZN4aidl7android8hardware10biometrics11fingerprint"
+                "17BpSessionCallback22onAuthenticationFailedEv"));
+
+    if (!real) {
+        LOGE("real BpSessionCallback::onAuthenticationFailed not found");
+        return ::ndk::ScopedAStatus::fromStatus(STATUS_UNKNOWN_TRANSACTION);
+    }
+
+    LOGI("AUTH FAILED: clearing auth success flag");
+    gAuthSucceededFlag.store(false);
+
+    return real(self);
 }
