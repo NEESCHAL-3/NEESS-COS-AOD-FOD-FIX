@@ -140,10 +140,46 @@ fn set_prop(name: &str, value: &str) {
         .status();
 }
 
-fn settings_put(name: &str, value: &str) {
+fn settings_get(name: &str) -> Option<String> {
+    let out = Command::new("/system/bin/settings")
+        .args(["get", "secure", name])
+        .output()
+        .ok()?;
+
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn settings_put_sync(name: &str, value: &str) {
     let _ = Command::new("/system/bin/settings")
         .args(["put", "secure", name, value])
         .status();
+}
+
+fn settings_put_async(name: &'static str, value: &'static str) {
+    thread::spawn(move || {
+        let _ = Command::new("/system/bin/settings")
+            .args(["put", "secure", name, value])
+            .status();
+    });
+}
+
+fn touch_set_fod(enable: bool) {
+    let val = if enable { "1" } else { "0" };
+    thread::spawn(move || {
+        let _ = Command::new("/system/bin/service")
+            .args([
+                "call",
+                "vendor.xiaomi.hw.touchfeature.ITouchFeature/default",
+                "9",
+                "i32",
+                "0",
+                "i32",
+                "10",
+                "i32",
+                val,
+            ])
+            .status();
+    });
 }
 
 fn write_backlight(value: u32) {
@@ -185,15 +221,19 @@ fn display_really_awake() -> bool {
         || text.contains("Wakefulness: Awake")
 }
 
-fn energy_saving_enabled() -> bool {
-    let output = match Command::new("/system/bin/settings")
-        .args(["get", "secure", "Setting_AodUserEnergySavingSet"])
-        .output()
-    {
-        Ok(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
-        Err(_) => return false,
-    };
-    output == "1"
+fn is_aod_master_enabled() -> bool {
+    settings_get("Setting_AodEnable")
+        .map(|v| v == "1")
+        .unwrap_or(true)
+}
+
+fn is_all_day_aod() -> bool {
+    if !is_aod_master_enabled() {
+        return false;
+    }
+    let energy = settings_get("Setting_AodUserEnergySavingSet").unwrap_or_default();
+    let imm = settings_get("Setting_AodEnableImmediate").unwrap_or_default();
+    energy == "0" && imm == "1"
 }
 
 fn main() {
@@ -224,12 +264,17 @@ fn main() {
         thread::sleep(Duration::from_millis(500));
     }
 
-    settings_put("Setting_AodSwitchEnable", "1");
+    let aod_enabled = is_aod_master_enabled();
+    if aod_enabled {
+        settings_put_sync("Setting_AodSwitchEnable", "1");
+    } else {
+        settings_put_sync("Setting_AodSwitchEnable", "0");
+    }
     klog("started AOD=28 FP=100 (ready)");
 
     let mut pending_energy_hide = false;
-    let mut fp_only_phase = false;
-    let mut fp_panel_allowed = false;
+    let mut fp_only_phase = !aod_enabled;
+    let mut fp_panel_allowed = !aod_enabled;
 
     loop {
         let mut child = match Command::new("/system/bin/logcat")
@@ -260,23 +305,20 @@ fn main() {
                 Err(_) => continue,
             };
 
-            // 1. DOZE ENTRY (Seamless AOD, Classic AOD, or Full Screen AOD)
+            // 1. DOZE ENTRY (Normal AOD clock start)
             if line.contains("setScreenState changed:")
                 && line.contains("->DOZE")
                 && !fp_only_phase
             {
-                thread::sleep(Duration::from_millis(220));
-                ensure_aod_backlight();
-
-                // Ensure Xiaomi touchfeature is in FOD mode (mode 10, value 1)
-                let _ = Command::new("/system/bin/service")
-                    .args(["call", "vendor.xiaomi.hw.touchfeature.ITouchFeature/default", "9", "i32", "0", "i32", "10", "i32", "1"])
-                    .status();
+                thread::spawn(|| {
+                    thread::sleep(Duration::from_millis(150));
+                    ensure_aod_backlight();
+                });
+                touch_set_fod(true);
             }
 
             // 2. ALL-DAY AOD KEEPALIVE
             // ColorOS wakes into DOZE for time updates then requests DOZE_SUSPEND.
-            // Pure string matching, no settings process calls.
             if !fp_only_phase {
                 if line.contains("Final-state=DOZE_SUSPEND") || line.contains("performAodUpdate") {
                     if read_backlight() == Some(0) {
@@ -286,76 +328,71 @@ fn main() {
                 }
             }
 
-            // 3. POWER-SAVING (10s/seamless/classic) TIMEOUT HIDE
+            // 3. POWER-SAVING (10s/smart) TIMEOUT HIDE
             if line.contains("onEnergySavingNotifyHide")
                 && !fp_only_phase
             {
-                if energy_saving_enabled() {
+                if !is_all_day_aod() {
                     pending_energy_hide = true;
-                    klog("power-saving AOD hide detected");
+                    // CRITICAL: Immediately disable AOD switch in background!
+                    // This ensures ColorOS enters Screen-Off Fingerprint (SOFOD) mode
+                    // before the screen reaches OFF, eliminating any race condition on instant pickup.
+                    settings_put_async("Setting_AodSwitchEnable", "0");
+                    fp_only_phase = true;
+                    fp_panel_allowed = true;
+                    klog("power-saving AOD hide -> armed SOFOD (Setting_AodSwitchEnable=0)");
                 } else {
                     klog("ignoring energy-saving hide (all-day AOD active)");
                 }
             }
 
-            // 4. TRANSITION TO OFF (AOD hides / panel turns off)
+            // 4. TRANSITION TO OFF (Screen goes completely off)
             if line.contains("setScreenState changed:DOZE->OFF")
-                && pending_energy_hide
-                && !fp_only_phase
+                && (pending_energy_hide || fp_only_phase)
             {
-                // CRITICAL: Telling ColorOS Setting_AodSwitchEnable=0 enables the
-                // Screen-Off Fingerprint (SOFOD) icon on touch/pickup!
-                settings_put("Setting_AodSwitchEnable", "0");
-
                 pending_energy_hide = false;
                 fp_only_phase = true;
                 fp_panel_allowed = true;
                 write_backlight(0);
-
-                klog("entered FP-only phase (SOFOD enabled)");
+                klog("entered FP-only phase (screen OFF, panel 0)");
             }
 
-            // 5. FAST SOFOD PATH (Screen-Off Fingerprint)
-            if line.contains("notifyWakeUpCallback type 1")
-                && fp_only_phase
-            {
-                fp_panel_allowed = true;
-                write_backlight(FP_BL);
-                klog("SOFOD wake -> panel 100");
-            }
+            // 5. ULTRA-FAST SOFOD PATH (Screen-Off Fingerprint Hint)
+            if fp_only_phase {
+                // Immediate trigger on motion pickup (AMD type 1) or tap (type 0)
+                if line.contains("notifyWakeUpCallback") {
+                    fp_panel_allowed = true;
+                    write_backlight(FP_BL);
+                    touch_set_fod(true);
+                    klog("SOFOD wake -> panel 100");
+                }
 
-            if line.contains("setScreenState changed:OFF->DOZE")
-                && fp_only_phase
-                && fp_panel_allowed
-            {
-                thread::sleep(Duration::from_millis(15));
-                if read_backlight() != Some(FP_BL) {
+                // Immediate re-assertion when display controller enters DOZE
+                if line.contains("setScreenState changed:OFF->DOZE") && fp_panel_allowed {
                     write_backlight(FP_BL);
                     klog("SOFOD DOZE -> panel 100");
                 }
-            }
 
-            if line.contains("OnScreenFingerprintIcon")
-                && line.contains("setVisibility VISIBLE")
-                && fp_only_phase
-                && fp_panel_allowed
-            {
-                if read_backlight() != Some(FP_BL) {
+                // Immediate re-assertion when fingerprint icon is drawn
+                if line.contains("OnScreenFingerprintIcon")
+                    && line.contains("setVisibility VISIBLE")
+                    && fp_panel_allowed
+                {
                     write_backlight(FP_BL);
-                    klog("SOFOD icon -> panel 100");
+                    klog("SOFOD icon VISIBLE -> panel 100");
+                }
+
+                // Immediate screen turn-off when icon times out
+                if line.contains("OnScreenFingerprintIcon")
+                    && line.contains("setVisibility INVISIBLE")
+                    && fp_panel_allowed
+                {
+                    write_backlight(0);
+                    klog("SOFOD icon INVISIBLE -> panel 0");
                 }
             }
 
-            if line.contains("OnScreenFingerprintIcon")
-                && line.contains("setVisibility INVISIBLE")
-                && fp_only_phase
-                && fp_panel_allowed
-            {
-                write_backlight(0);
-                klog("FP-only icon hidden -> panel 0");
-            }
-
-            // 6. SCREEN WAKE TO ON
+            // 6. SCREEN WAKE TO ON (Device awake / interactive)
             if line.contains("setScreenState changed:")
                 && line.contains("->ON")
             {
@@ -363,14 +400,17 @@ fn main() {
                 klog("SCREEN ON -> release FP brightness control");
 
                 if fp_only_phase {
-                    thread::sleep(Duration::from_millis(700));
+                    pending_energy_hide = false;
+                    fp_only_phase = false;
 
-                    if display_really_awake() {
-                        settings_put("Setting_AodSwitchEnable", "1");
-                        pending_energy_hide = false;
-                        fp_only_phase = false;
-                        klog("real wake -> AOD content restored");
-                    }
+                    // Restore AOD switch for next sleep cycle in background
+                    thread::spawn(|| {
+                        thread::sleep(Duration::from_millis(500));
+                        if display_really_awake() && is_aod_master_enabled() {
+                            settings_put_sync("Setting_AodSwitchEnable", "1");
+                            klog("real wake -> AOD content restored (Setting_AodSwitchEnable=1)");
+                        }
+                    });
                 }
             }
         }
