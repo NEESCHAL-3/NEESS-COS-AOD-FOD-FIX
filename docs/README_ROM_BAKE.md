@@ -100,6 +100,7 @@ The script automatically:
    Append these lines to `vendor.prop` (or `[ROM]/vendor/build.prop`):
 
 ```properties
+# AIDL Fingerprint HAL
 vendor.fingerprint.aidl.support=1
 
 # Rodin Oplus FOD UI gate

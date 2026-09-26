@@ -144,6 +144,7 @@ ro.oplus.aod.fod.support=true
 * Append to `vendor.prop` (or `/vendor/build.prop`):
 
 ```properties
+# AIDL Fingerprint HAL
 vendor.fingerprint.aidl.support=1
 
 # Rodin Oplus FOD UI gate
