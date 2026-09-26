@@ -1,11 +1,11 @@
 # NEESS COS AOD + FOD FIX (POCO X7 Pro / Rodin)
 
-[![Platform](https://img.shields.io/badge/Platform-Android%2015%20%7C%20ColorOS%2015-brightgreen.svg)]()
+[![Platform](https://img.shields.io/badge/Platform-ColorOS-brightgreen.svg)]()
 [![Device](https://img.shields.io/badge/Device-POCO%20X7%20Pro%20(Rodin)-blue.svg)]()
 [![SELinux](https://img.shields.io/badge/SELinux-100%25%20Enforcing%20Compliant-success.svg)]()
 [![Touch](https://img.shields.io/badge/Touch-Goodix%20%2B%20FocalTech-orange.svg)]()
 
-Native under-display fingerprint (FOD) and Always-On Display (AOD) hardware compatibility layer for **POCO X7 Pro (Rodin)** running ColorOS / OxygenOS ports. 
+Native under-display fingerprint (FOD) and Always-On Display (AOD) hardware compatibility layer for **POCO X7 Pro (Rodin)** running ColorOS ports. 
 
 Achieves full OEM-grade FOD unlock, seamless animations, and AOD modes **without patching ColorOS SystemUI bytecode**.
 
