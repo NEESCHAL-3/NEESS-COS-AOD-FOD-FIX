@@ -9,15 +9,22 @@ service mfp-daemon /vendor/bin/hw/mfp-daemon
     setenv LD_PRELOAD /vendor/lib64/librodin_fp_compat.so
 
 on boot
+    # Goodix touchscreen FOD node
     chown system system /sys/devices/platform/goodix_ts.0/fod_enable
     chmod 0660 /sys/devices/platform/goodix_ts.0/fod_enable
 
+    # FocalTech touchscreen FOD node
+    chown system system /sys/devices/platform/focaltech_ts.0/fod_enable
+    chmod 0660 /sys/devices/platform/focaltech_ts.0/fod_enable
+
+    # Xiaomi generic touch devices
     chown system system /sys/devices/virtual/touch/touch_dev/fod_enable
     chmod 0660 /sys/devices/virtual/touch/touch_dev/fod_enable
 
     chown system system /sys/class/touch/touch_dev/fod_enable
     chmod 0660 /sys/class/touch/touch_dev/fod_enable
 
+    # Xiaomi display feature node & symlink
     mkdir /dev/mi_display 0755 system system
     symlink /dev/disp_feature /dev/mi_display/disp_feature
     chown system system /dev/disp_feature
