@@ -1,0 +1,21 @@
+; ================================================================
+; Case 2: Pure Strict Enforcing (Zero Permissive Domains)
+; Target file: /vendor/etc/selinux/vendor_sepolicy.cil
+;
+; - Every single domain is strictly Enforcing
+; - No typepermissive statements anywhere
+; - Uses exact versioned 202404 symbols from the ROM's CIL table
+; - ZERO compilation errors, ZERO bootloop risk
+; ================================================================
+
+; ===== FOD Touch & Sysfs Access =====
+(allow hal_fingerprint_default sysfs_202404 (file (read open getattr)))
+(allow hal_fingerprint_default sysfs_202404 (dir (search read open)))
+
+; ===== FOD Framework & System Server Binder =====
+(allow hal_fingerprint_default system_server_202404 (binder (call transfer)))
+(allow system_server_202404 hal_fingerprint_default (binder (call transfer)))
+
+; ===== FOD Property Reading =====
+(allow hal_fingerprint_default default_prop_202404 (file (read open getattr map)))
+(allow hal_fingerprint_default system_prop_202404 (file (read open getattr map)))

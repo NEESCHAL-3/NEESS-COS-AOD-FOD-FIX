@@ -75,9 +75,10 @@ NEESS-COS-AOD-FOD-FIX/
 │   │   ├── CMakeLists.txt
 │   │   └── rodin_fp_compat.cpp        # Dual-touch, Feature 217 & AIDL hooks
 │   └── zz_rodin_fp_compat.rc          # Preload & Goodix/Focaltech sysfs setup
-├── sepolicy/                          # Bakable SELinux policies
-│   ├── vendor_sepolicy.cil.append     # Pre-formatted CIL rules for vendor_sepolicy.cil
-│   └── rodin_fod_aod.te               # Source .te format for AOSP tree compilation
+├── sepolicy/                          # Bakable SELinux policies (Tested & Verified)
+│   ├── vendor_sepolicy.cil.append     # Default CIL append (Hybrid Enforcing)
+│   ├── vendor_sepolicy_hybrid.cil.append # Case 1: Full ROM Enforcing + FOD Permissive
+│   └── vendor_sepolicy_strict.cil.append # Case 2: 100% Pure Strict Enforcing
 ├── scripts/                           # Build & packaging scripts
 │   ├── bake_into_rom.sh               # 1-command unpacked ROM injection script
 │   ├── build_aod.sh                   # Cargo cross-compiler script

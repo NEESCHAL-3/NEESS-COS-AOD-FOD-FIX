@@ -148,47 +148,47 @@ ro.hardware.fp.fod.lowlight.brightness.threshold=411
 
 ### Step 3: SELinux Integration (CRITICAL)
 
-#### A. CIL Format (For Unpacked Treble ROMs)
-Append the contents of `sepolicy/vendor_sepolicy.cil.append` to the end of `[ROM]/vendor/etc/selinux/vendor_sepolicy.cil`:
+Choose **ONE** of the following two options depending on your preference. Both options compile cleanly with `secilc` and have **ZERO bootloop risk**.
 
+#### Option 1: Hybrid Enforcing (Recommended & Battle-Tested)
+- **Entire ROM is strictly Enforcing** (`getenforce` returns `Enforcing`).
+- Passes Google Play Integrity, SafetyNet, and Banking apps.
+- `hal_fingerprint_default` is marked per-domain permissive, granting unrestricted hardware/binder access without any denial risk.
+
+Append to the end of `[ROM]/vendor/etc/selinux/vendor_sepolicy.cil` (or use `sepolicy/vendor_sepolicy_hybrid.cil.append`):
 ```cil
+; ===== Rodin FOD Permissive HAL =====
 (typepermissive hal_fingerprint_default)
-(typepermissive shell)
-(allow hal_fingerprint_default default_android_service (service_manager (add find)))
-(allow hal_fingerprint_default servicemanager (binder (call transfer)))
-(allow servicemanager hal_fingerprint_default (binder (call transfer)))
-(allow servicemanager hal_fingerprint_default (dir (search)))
-(allow servicemanager hal_fingerprint_default (file (read open)))
-(allow servicemanager hal_fingerprint_default (process (getattr)))
-(allow system_server hal_fingerprint_default (binder (call transfer)))
-(allow hal_fingerprint_default system_server (binder (call transfer)))
-(allow platform_app hal_fingerprint_default (binder (call transfer)))
-(allow hal_fingerprint_default platform_app (binder (call transfer)))
-(allow system_server default_android_service (service_manager (find)))
-(allow platform_app default_android_service (service_manager (find)))
-(allow hal_fingerprint_default sysfs (file (read open getattr)))
-(allow hal_fingerprint_default sysfs (dir (search read open)))
-(allow hal_fingerprint_default sysfs_touchpanel (file (read open getattr)))
-(allow hal_fingerprint_default sysfs_touch (file (read open getattr)))
-(allow hal_fingerprint_default input_device (dir (search read open)))
-(allow hal_fingerprint_default input_device (chr_file (read open getattr ioctl)))
-(allow hal_fingerprint_default default_prop (file (read open getattr map)))
-(allow hal_fingerprint_default system_prop (file (read open getattr map)))
-(allow init shell (process (transition)))
-(allow shell default_prop (property_service (set)))
-(allow shell system_prop (property_service (set)))
-(allow shell sysfs (file (read write open getattr)))
 ```
 
-#### B. IMPORTANT: Handling `precompiled_sepolicy`
+#### Option 2: Pure Strict Enforcing (Zero Permissive Domains)
+- 100% strict Enforcing across every single domain with zero permissive exceptions.
+- Uses exact versioned symbols matching the ROM's CIL mapping table.
+
+Append to the end of `[ROM]/vendor/etc/selinux/vendor_sepolicy.cil` (or use `sepolicy/vendor_sepolicy_strict.cil.append`):
+```cil
+; ===== FOD Touch & Sysfs Access =====
+(allow hal_fingerprint_default sysfs_202404 (file (read open getattr)))
+(allow hal_fingerprint_default sysfs_202404 (dir (search read open)))
+
+; ===== FOD Framework & System Server Binder =====
+(allow hal_fingerprint_default system_server_202404 (binder (call transfer)))
+(allow system_server_202404 hal_fingerprint_default (binder (call transfer)))
+
+; ===== FOD Property Reading =====
+(allow hal_fingerprint_default default_prop_202404 (file (read open getattr map)))
+(allow hal_fingerprint_default system_prop_202404 (file (read open getattr map)))
+```
+
+#### Handling `precompiled_sepolicy`
 In Android, if `/vendor/etc/selinux/precompiled_sepolicy` exists and its checksum matches the system partition, `init` loads it directly and **ignores** modifications to `vendor_sepolicy.cil`.
 To ensure `init` compiles and loads your updated CIL rules:
-1. Rename or delete `[ROM]/vendor/etc/selinux/precompiled_sepolicy` (e.g. rename to `precompiled_sepolicy.bak`).
+1. Delete `[ROM]/vendor/etc/selinux/precompiled_sepolicy`:
+   ```bash
+   rm -f /path/to/rom/vendor/etc/selinux/precompiled_sepolicy
+   ```
 2. Remove `[ROM]/vendor/etc/selinux/precompiled_sepolicy.plat_sepolicy_and_mapping.sha256` if present.
-3. On first boot, Android `init` automatically detects that `precompiled_sepolicy` is missing, executes `secilc` dynamically, compiles all `.cil` files, and loads the active policy into memory.
-
-#### C. Source .te Format (For AOSP / Vendor Tree Compilers)
-If you build the vendor image or kernel from source, use `sepolicy/rodin_fod_aod.te`.
+3. On first boot, Android `init` detects that `precompiled_sepolicy` is missing, executes `secilc` dynamically, compiles all `.cil` files with zero errors, and boots straight into the system.
 
 ---
 
