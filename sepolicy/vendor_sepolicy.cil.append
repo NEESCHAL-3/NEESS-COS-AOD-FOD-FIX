@@ -4,12 +4,6 @@
 ; Mode: 100% Strict Enforcing (Zero Permissive Domains)
 ; ================================================================
 
-; ===== ColorWave AIDL SHM =====
-(allow hal_audio_default shell_data_file_202404 (dir (search read open getattr write add_name remove_name rename)))
-(allow hal_audio_default shell_data_file_202404 (file (read write create open getattr setattr unlink rename map)))
-(allow mtk_hal_audio shell_data_file_202404 (dir (search read open getattr write add_name remove_name rename)))
-(allow mtk_hal_audio shell_data_file_202404 (file (read write create open getattr setattr unlink rename map)))
-
 ; ===== Pure Strict Enforcing FOD Rules =====
 (allow hal_fingerprint_default sysfs_202404 (file (read open getattr)))
 (allow hal_fingerprint_default sysfs_202404 (dir (search read open)))

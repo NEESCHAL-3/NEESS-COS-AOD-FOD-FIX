@@ -127,17 +127,27 @@ if [ -f "$ODM_SC" ]; then
 fi
 
 # CRITICAL TREBLE STEP:
-# If vendor has precompiled_sepolicy, init will load it and IGNORE vendor_sepolicy.cil edits!
-# We back it up and remove it so Android init runs secilc to compile our new CIL rules at boot.
-PRECOMPILED="$VEN_DIR/etc/selinux/precompiled_sepolicy"
-if [ -f "$PRECOMPILED" ]; then
-  echo "   [CRITICAL] Found precompiled_sepolicy in vendor partition."
-  echo "   Backing up to precompiled_sepolicy.bak and removing original,"
-  echo "   forcing init to compile fresh policy from CIL files on boot..."
-  mv "$PRECOMPILED" "${PRECOMPILED}.bak"
-  rm -f "${PRECOMPILED}.plat_sepolicy_and_mapping.sha256" 2>/dev/null || true
-  echo "   [OK] precompiled_sepolicy handled."
-fi
+# On Android Treble devices (including POCO X7 Pro / ColorOS ports), if precompiled_sepolicy exists
+# in /odm/etc/selinux or /vendor/etc/selinux, Android init will load the precompiled binary blob
+# and completely IGNORE custom CIL policy edits!
+# We remove all 3 precompiled sepolicy files:
+#   1. precompiled_sepolicy
+#   2. precompiled_sepolicy.plat_sepolicy_and_mapping.sha256
+#   3. precompiled_sepolicy.*_sepolicy_and_mapping.sha256
+# This forces Android init to dynamically invoke secilc at boot and compile all custom CIL rules cleanly.
+for DIR in "$ROM_ROOT/odm/etc/selinux" "$VEN_DIR/etc/selinux"; do
+  if [ -d "$DIR" ]; then
+    FOUND=$(find "$DIR" -maxdepth 1 -name "precompiled_sepolicy*" 2>/dev/null)
+    if [ -n "$FOUND" ]; then
+      echo "   [CRITICAL] Found precompiled sepolicy files in $DIR:"
+      echo "$FOUND" | while read -r f; do
+        echo "     -> Neutralizing $(basename "$f")"
+        mv -f "$f" "${f}.bak" 2>/dev/null || rm -f "$f"
+      done
+      echo "   [OK] Precompiled sepolicy files neutralized in $DIR."
+    fi
+  fi
+done
 
 # 7. Update SELinux file_contexts if present in unpacked partitions
 echo "-> [7/8] Updating SELinux file_contexts for image repackers (erofs/ext4)..."

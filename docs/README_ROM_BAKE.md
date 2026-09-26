@@ -120,10 +120,20 @@ When an AIDL service is added, `servicemanager` checks `service_contexts`.
   ```
   Because `vendor_hal_fingerprint_service_xiaomi` is already allowed to be added by `hal_fingerprint_default` and found by `platform_app_202404` (SystemUI) and `system_server_202404`, registration succeeds with **zero denials and zero extra CIL rules required**.
 
-### Step 5: Handle `precompiled_sepolicy`
-If your vendor partition contains `/vendor/etc/selinux/precompiled_sepolicy`, Android `init` will load that binary blob directly and **completely ignore your edits** to `vendor_sepolicy.cil`.
-* Always rename or remove `precompiled_sepolicy` and `precompiled_sepolicy.plat_sepolicy_and_mapping.sha256`.
-* On first boot, `init` will automatically invoke `secilc` to compile your updated `vendor_sepolicy.cil` into a fresh, unified policy.
+### Step 5: Critical Treble Step — Neutralize the 3 `precompiled_sepolicy` Files in `/odm/etc/selinux` & `/vendor/etc/selinux`
+On modern Android Treble devices with dedicated vendor/odm partitions (like POCO X7 Pro / Rodin running ColorOS ports), Android ships up to 3 precompiled SELinux policy artifacts:
+1. `precompiled_sepolicy`
+2. `precompiled_sepolicy.plat_sepolicy_and_mapping.sha256`
+3. `precompiled_sepolicy.*_sepolicy_and_mapping.sha256` (e.g. `system_ext` or `product`)
+
+**Why this is critical:** During early boot, Android `init` verifies whether the SHA256 hashes of the system partitions match the stored `.sha256` checksum files. If they match, `init` loads `precompiled_sepolicy` directly into the kernel and **completely ignores your edits to `vendor_sepolicy.cil` and `odm_sepolicy.cil`**! Any custom allow rules you added will never take effect.
+
+**The Professional Solution:**
+Remove or back up all 3 `precompiled_sepolicy*` files located in:
+* `/odm/etc/selinux/`
+* `/vendor/etc/selinux/`
+
+When these 3 files are neutralized, Android `init` detects that no valid precompiled policy exists and automatically invokes `/system/bin/secilc` at boot time to compile `plat_sepolicy.cil` + `vendor_sepolicy.cil` + `odm_sepolicy.cil` into a monolithic runtime policy, seamlessly activating all custom strict rules with zero bootloop risk.
 
 ---
 
