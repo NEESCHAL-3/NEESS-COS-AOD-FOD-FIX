@@ -239,6 +239,12 @@ dmesg | grep -iE 'avc.*fingerprint'
 
 ---
 
+## Credits & Authors
+* **NEESCHAL** – Lead developer, hardware reverse engineering, protocol shims, and timing state machines.
+* Community testers for feedback and telemetry logs.
+
+---
+
 ## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE).

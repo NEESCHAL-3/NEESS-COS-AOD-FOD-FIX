@@ -138,3 +138,16 @@ When these 3 files are neutralized, Android `init` detects that no valid precomp
 ---
 
 After running the script, repack your `system.img`, `vendor.img`, `odm.img` (or `super.img`) and flash!
+
+---
+
+## Credits & Authors
+* **NEESCHAL** – Lead developer, hardware reverse engineering, protocol shims, and timing state machines.
+* Community testers for feedback and telemetry logs.
+
+---
+
+## License
+
+Licensed under the [Apache License, Version 2.0](../LICENSE).
+Copyright (c) 2026 NEESCHAL-3 and NEESS-COS-AOD-FOD-FIX Contributors.
