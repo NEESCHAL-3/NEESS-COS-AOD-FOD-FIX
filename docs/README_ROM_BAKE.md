@@ -1,225 +1,130 @@
-# POCO X7 Pro (Rodin) - Unpacked ROM Integration & SELinux Guide (TEST 4.0)
+# POCO X7 Pro (Rodin) - ROM Bake-In Installer (TEST 4.0 Final)
 
-This package contains everything required to bake the verified working **FOD (Fingerprint on Display)** and **AOD (Always On Display)** fixes directly into an unpacked ColorOS port for the POCO X7 Pro (Rodin).
+Native ColorOS 15 AOD & Optical FOD Hardware Compatibility Layer for **POCO X7 Pro (Rodin)**.
 
----
-
-## Summary of Root-Cause Fixes in TEST 4.0
-
-| Issue | Root Cause | Solution in TEST 4.0 |
-|---|---|---|
-| **Daemon Crash Loop / Fork Bomb** | `nees_aodd` in TEST 3.8 was running `/system/bin/settings get secure Setting_AodSwitchEnable` on **every single logcat line**, spawning 100+ Java processes per second. Android watchdog (`MBrainServer`) was repeatedly killing `nees_aodd` every 30ms, dropping panel backlight to 0. | Restored **zero-fork stream processing** from original working source. Logcat is inspected purely with string matching (`line.contains()`) with zero process spawning. |
-| **Seamless & Classic AOD Cutoff (2s)** | ColorOS `SmoothTransitionController` calls `setDisplayPanelFeature` for feature `217` (`OPLUS_FEATURE_AOD_SMOOTH`). In previous builds, `librodin_fp_compat.so` returned `-1` (unsupported), prompting ColorOS to abort smooth AOD and force the screen OFF after 2s. | Feature 217 is explicitly handled and returns `STATUS_OK` (0) in `librodin_fp_compat.so`. Seamless and Classic AOD stay lit without cutting off. |
-| **Screen-Off Fingerprint (SOFOD) Dead** | Daemon was missing `settings_put("Setting_AodSwitchEnable", "0")` on `DOZE->OFF`. ColorOS believed AOD was still displaying and completely suppressed the screen-off fingerprint icon. | Restored exact state machine from original source: sets `Setting_AodSwitchEnable=0` on `DOZE->OFF`, lights panel (100) on `notifyWakeUpCallback type 1`, and restores `1` on screen wake (`->ON`). |
-| **SELinux Enforcing Compatibility** | Previous test stripped SEPolicy rules, causing denials when running in Enforcing mode. | Clean **Per-Domain Permissive** policy (`hal_fingerprint_default` and `shell`). The **whole ROM stays globally Enforcing** (`getenforce` returns `Enforcing`, passing Play Integrity and Banking apps) while the two hardware daemons have full hardware access. |
+This kit bakes all fixes directly into your unpacked ROM partitions (`system`, `vendor`, `odm`).
+**No root, Magisk, or KernelSU required** on the flashed device. Works 100% out-of-the-box on clean flash with **100% Pure Strict Enforcing SELinux** (zero permissive domains).
 
 ---
 
-## Package Directory Structure
+## What's Included & Fixed in TEST 4.0 Final
 
-```text
-POCO_X7_Pro_ROM_BAKE_TEST_4_0/
-├── bake_into_rom.sh                         # Automated 1-command ROM injection script
-├── README_ROM_BAKE.md                      # This comprehensive guide
-├── system/
-│   ├── bin/
-│   │   └── nees_aodd                       # Zero-fork AOD backlight & SOFOD daemon
-│   ├── etc/
-│   │   └── init/
-│   │       └── nees_aodd.rc                # Init service configuration (u:r:shell:s0)
-│   └── build.prop.append                   # Properties to append to system/build.prop
-├── vendor/
-│   ├── lib64/
-│   │   └── librodin_fp_compat.so           # FOD compat shim with feature 217 ACK
-│   └── etc/
-│       ├── init/
-│       │   └── zz_rodin_fp_compat.rc       # mfp-daemon preload & touch node permissions
-│       └── selinux/
-│           └── vendor_sepolicy.cil.append  # CIL rules for vendor_sepolicy.cil
-└── sepolicy/
-    ├── vendor_sepolicy.cil.append          # Pre-formatted CIL rules
-    └── rodin_fod_aod.te                    # Source .te format for AOSP source compilation
-```
+1. **Instant LHBM Off on Unlock (OEM Match)**:
+   - Immediately turns off Xiaomi optical LHBM spotlight (`setTouchFeature(0, 10, 0)`) the exact millisecond authentication succeeds.
+   - Prevents the optical highlight from lingering while the user holds their finger down after unlocking.
+2. **Lockscreen Dimming & Black Box Fixed**:
+   - Registers `vendor.oplus.hardware.displaypanelfeature.IDisplayPanelFeature/default` in ServiceManager.
+   - Evaluates `isLocalHBM = 410` (true), completely destroying `OnScreenFingerprintDimLayer` (full brightness lockscreen, zero black box).
+3. **DT_NEEDED ELF Baking**:
+   - Injects `librodin_fp_compat.so` into `/vendor/bin/hw/mfp-daemon` ELF headers via `patchelf`.
+   - Loaded automatically by the bionic dynamic linker at boot without `LD_PRELOAD`.
+4. **100% Pure Strict Enforcing SELinux**:
+   - Zero permissive domains (`typepermissive` completely removed).
+   - Full compliance with Google Play Integrity / CTS / banking apps.
+5. **Seamless & Classic AOD**:
+   - Full-day AOD and energy-saving modes supported without watchdog crashes.
 
 ---
 
-## Method 1: Automated Integration (Recommended)
+## How to Bake Into Your ROM
 
-Run `bake_into_rom.sh` and supply the path to your unpacked ROM:
+### Prerequisites on Build Host
+- Linux / WSL
+- `patchelf` (`sudo apt install patchelf`)
 
+### Usage
 ```bash
 chmod +x bake_into_rom.sh
-./bake_into_rom.sh /path/to/unpacked_rom
+./bake_into_rom.sh /path/to/unpacked_rom_root
 ```
 
-The script automatically:
-1. Detects `system` and `vendor` partition roots (including SAR `system/system/` layout).
-2. Copies `nees_aodd` to `system/bin/` (`0755`).
-3. Copies `nees_aodd.rc` to `system/etc/init/` (`0644`).
-4. Copies `librodin_fp_compat.so` to `vendor/lib64/` (`0644`).
-5. Copies `zz_rodin_fp_compat.rc` to `vendor/etc/init/` (`0644`).
-6. Appends CIL rules to `vendor/etc/selinux/vendor_sepolicy.cil`.
-7. **Handles `precompiled_sepolicy`:** Backs up and removes any stale `precompiled_sepolicy` so Android `init` dynamically compiles your new CIL rules at boot.
-8. Appends properties to `system/build.prop`.
-
----
-
-## Method 2: Manual Integration
-
-### Step 1: System Partition (`system/`)
-1. **Copy AOD Daemon:**
-   `system/bin/nees_aodd` -> `[ROM]/system/bin/nees_aodd`
-   * Permissions: `0755` (`rwxr-xr-x`, root:root)
-   * SELinux context: `u:object_r:system_file:s0`
-2. **Copy Daemon Init Service:**
-   `system/etc/init/nees_aodd.rc` -> `[ROM]/system/etc/init/nees_aodd.rc`
-   * Permissions: `0644` (`rw-r--r--`, root:root)
-   * SELinux context: `u:object_r:system_file:s0`
-3. **Append Properties:**
-   Add these lines to `[ROM]/system/build.prop`:
-   ```properties
-   ro.nees.aod.auth=NEES4.da2be82c1aa5c6cd4ea892a1e36ad5e95ede8c4e427eae72ab0edb70f90455eb.ng4nZYoavfIg9S3JEtflMpx0+T7BeAjqIwnmwT0+MkovQdIQQYGDkeRYnIzcOWSrrLawyi9EyhimwDjFuTIoAA==
-   sys.nees4.authorized=1
-   ro.nees.fod.compat=1
-   persist.sys.rodin.aod_keep_doze=1
-   ro.oplus.aod.fod.support=true
-   ```
-
----
-
-### Step 2: Vendor Partition (`vendor/`)
-1. **Copy FOD Compat Shim:**
-   `vendor/lib64/librodin_fp_compat.so` -> `[ROM]/vendor/lib64/librodin_fp_compat.so`
-   * Permissions: `0644` (`rw-r--r--`, root:root)
-   * SELinux context: `u:object_r:vendor_file:s0`
-2. **Copy Hardware Hook Init Script:**
-   `vendor/etc/init/zz_rodin_fp_compat.rc` -> `[ROM]/vendor/etc/init/zz_rodin_fp_compat.rc`
-   * Permissions: `0644` (`rw-r--r--`, root:root)
-   * SELinux context: `u:object_r:vendor_configs_file:s0`
-3. **Append Vendor Properties:**
-   Append these lines to `vendor.prop` (or `[ROM]/vendor/build.prop`):
-
-```properties
-# AIDL Fingerprint HAL
-vendor.fingerprint.aidl.support=1
-
-# Rodin Oplus FOD UI gate
-persist.vendor.fingerprint.type=udfps_optical
-persist.vendor.fingerprint.sensor_type=optical
-persist.vendor.fingerprint.fod.enable=true
-persist.vendor.fingerprint.animation=true
-persist.vendor.fingerprint.sensor_location=504,2332,105
-persist.vendor.fp.vendor=goodix
-
-# Oplus optical fingerprint support
-ro.oplus.biometrics.fingerprint.optical=true
-ro.oplus.aod.support=true
-ro.oplus.aod.fod.support=true
-ro.vendor.fod.animation.support=true
-persist.sys.fingerprint.animation=1
-persist.sys.fp.fod.anim=1
-persist.sys.fp.fod.screenoff=true
-
-# Rodin Xiaomi FOD core
-ro.hardware.fp.fod=true
-ro.hardware.fp.tddi=true
-ro.hardware.fp.fod.location=low
-ro.hardware.fp.fod.touch.ctl.version=2.0
-ro.hardware.fp.halworkmode=true
-ro.hardware.fp.mievent=true
-ro.hardware.fp.onetrack.period=3600000
-
-# Rodin Goodix FOD values
-persist.vendor.sys.fp.vendor=goodix_fod
-persist.vendor.sys.fp.module=ofilm
-persist.vendor.sys.fp.fod.optimize=true
-persist.vendor.sys.fp.expolevel=0x88
-persist.vendor.sys.fp.fod.location.X_Y=504,2332
-persist.vendor.sys.fp.fod.size.width_height=210,210
-persist.vendor.sys.fp.fp_anti_mistouch=true
-persist.vendor.sys.fp.heartbeat=true
-
-# Low brightness FOD thresholds
-ro.hardware.fp.fod.lowlight.lux.threshold=3
-ro.hardware.fp.fod.lowlight.brightness.threshold=411
+Example:
+```bash
+./bake_into_rom.sh /home/neeschal/rom_work/unpacked
 ```
 
+### What the Script Does Automatically:
+1. Installs `nees_aodd` into `system/bin/nees_aodd` (`0755`, `u:object_r:system_file:s0`).
+2. Installs `nees_aodd.rc` into `system/etc/init/nees_aodd.rc` (`0644`).
+3. Installs `librodin_fp_compat.so` into `vendor/lib64/librodin_fp_compat.so` (`0644`).
+4. Injects `DT_NEEDED: librodin_fp_compat.so` into `vendor/bin/hw/mfp-daemon` using `patchelf`.
+5. Installs `zz_rodin_fp_compat.rc` into `vendor/etc/init/zz_rodin_fp_compat.rc` (`0644`).
+6. Appends strict enforcing CIL rules to `vendor/etc/selinux/vendor_sepolicy.cil`.
+7. Appends `IDisplayPanelFeature` AIDL mapping to `vendor/etc/selinux/vendor_service_contexts` and `odm/etc/selinux/odm_service_contexts`.
+8. Safely renames stale `precompiled_sepolicy` so init compiles fresh CIL policy on first boot.
+9. Updates `plat_file_contexts` and `vendor_file_contexts` for image repackers (`erofs`/`ext4`).
+10. Appends optimized FOD/AOD properties to `system/build.prop`.
+
 ---
 
-### Step 3: SELinux Integration (CRITICAL)
+## How to Inspect SELinux Denials & Add Validated Strict CIL Rules
 
-Choose **ONE** of the following two options depending on your preference. Both options compile cleanly with `secilc` and have **ZERO bootloop risk**.
+When porting or modifying system components, never switch to permissive mode. Follow this exact workflow to identify denials and add clean, versioned CIL rules:
 
-#### Option 1: Hybrid Enforcing (Recommended & Battle-Tested)
-- **Entire ROM is strictly Enforcing** (`getenforce` returns `Enforcing`).
-- Passes Google Play Integrity, SafetyNet, and Banking apps.
-- `hal_fingerprint_default` is marked per-domain permissive, granting unrestricted hardware/binder access without any denial risk.
+### Step 1: Capture Audit Denials
+Run via ADB:
+```bash
+# Check kernel audit buffer
+adb shell "dmesg | grep avc"
 
-Append to the end of `[ROM]/vendor/etc/selinux/vendor_sepolicy.cil` (or use `sepolicy/vendor_sepolicy_hybrid.cil.append`):
+# Check logcat audit events
+adb shell "logcat -b all -d | grep -iE 'avc:  denied'"
+```
+
+### Step 2: Decode the Audit Denial
+Example denial message:
+```text
+type=1400 audit(...): avc:  denied  { read open getattr } for  comm="mfp-daemon" path="/sys/devices/virtual/touch/touch_dev/fod_enable" dev="sysfs" ino=1234 scontext=u:r:hal_fingerprint_default:s0 tcontext=u:object_r:sysfs:s0 tclass=file permissive=0
+```
+
+Break down the components:
+* `scontext`: Calling domain (`hal_fingerprint_default`)
+* `tcontext`: Target object/domain (`sysfs`)
+* `tclass`: Object class (`file`, `dir`, `binder`, `service_manager`, `chr_file`, `property_service`)
+* `{ ... }`: The denied action(s) (`read`, `open`, `getattr`, `call`, `transfer`, `add`, `find`, `set`)
+
+### Step 3: Translate to Treble CIL Format
+In Treble-compliant vendor images (Android 14/15), system types referenced by vendor CIL files are versioned (e.g. `_202404`). 
+
+Check existing versioned symbols in your vendor image:
+```bash
+grep -E "\(type (sysfs_|system_server_|default_prop_)" /vendor/etc/selinux/vendor_sepolicy.cil
+```
+
+Construct the CIL allow rule:
 ```cil
-; ===== Rodin FOD Permissive HAL =====
-(typepermissive hal_fingerprint_default)
+(allow <scontext> <tcontext> (<tclass> (<actions...>)))
 ```
 
-#### Option 2: Pure Strict Enforcing (Zero Permissive Domains)
-- 100% strict Enforcing across every single domain with zero permissive exceptions.
-- Uses exact versioned symbols matching the ROM's CIL mapping table.
-
-Append to the end of `[ROM]/vendor/etc/selinux/vendor_sepolicy.cil` (or use `sepolicy/vendor_sepolicy_strict.cil.append`):
+Examples of verified strict rules:
 ```cil
-; ===== FOD Touch & Sysfs Access =====
+; File and directory access
 (allow hal_fingerprint_default sysfs_202404 (file (read open getattr)))
 (allow hal_fingerprint_default sysfs_202404 (dir (search read open)))
 
-; ===== FOD Framework & System Server Binder =====
+; Binder IPC between HAL and system server
 (allow hal_fingerprint_default system_server_202404 (binder (call transfer)))
 (allow system_server_202404 hal_fingerprint_default (binder (call transfer)))
 
-; ===== FOD Property Reading =====
+; Property reading
 (allow hal_fingerprint_default default_prop_202404 (file (read open getattr map)))
 (allow hal_fingerprint_default system_prop_202404 (file (read open getattr map)))
 ```
 
-#### Handling `precompiled_sepolicy`
-In Android, if `/vendor/etc/selinux/precompiled_sepolicy` exists and its checksum matches the system partition, `init` loads it directly and **ignores** modifications to `vendor_sepolicy.cil`.
-To ensure `init` compiles and loads your updated CIL rules:
-1. Delete `[ROM]/vendor/etc/selinux/precompiled_sepolicy`:
-   ```bash
-   rm -f /path/to/rom/vendor/etc/selinux/precompiled_sepolicy
-   ```
-2. Remove `[ROM]/vendor/etc/selinux/precompiled_sepolicy.plat_sepolicy_and_mapping.sha256` if present.
-3. On first boot, Android `init` detects that `precompiled_sepolicy` is missing, executes `secilc` dynamically, compiles all `.cil` files with zero errors, and boots straight into the system.
+### Step 4: Handle AIDL Services in ServiceManager
+When an AIDL service is added, `servicemanager` checks `service_contexts`.
+* If you assign the service to an existing authorized type:
+  In `/vendor/etc/selinux/vendor_service_contexts`:
+  ```text
+  vendor.oplus.hardware.displaypanelfeature.IDisplayPanelFeature/default u:object_r:vendor_hal_fingerprint_service_xiaomi:s0
+  ```
+  Because `vendor_hal_fingerprint_service_xiaomi` is already allowed to be added by `hal_fingerprint_default` and found by `platform_app_202404` (SystemUI) and `system_server_202404`, registration succeeds with **zero denials and zero extra CIL rules required**.
+
+### Step 5: Handle `precompiled_sepolicy`
+If your vendor partition contains `/vendor/etc/selinux/precompiled_sepolicy`, Android `init` will load that binary blob directly and **completely ignore your edits** to `vendor_sepolicy.cil`.
+* Always rename or remove `precompiled_sepolicy` and `precompiled_sepolicy.plat_sepolicy_and_mapping.sha256`.
+* On first boot, `init` will automatically invoke `secilc` to compile your updated `vendor_sepolicy.cil` into a fresh, unified policy.
 
 ---
 
-## Verification After First Boot
-
-Once booted, open an ADB shell or terminal and run:
-
-```bash
-# 1. Verify global SELinux is Enforcing
-getenforce
-# Expected output: Enforcing
-
-# 2. Verify services are running
-getprop init.svc.nees_aodd
-# Expected: running
-getprop init.svc.mfp-daemon
-# Expected: running
-
-# 3. Verify runtime authorization
-getprop sys.nees4.authorized
-# Expected: 1
-
-# 4. Verify DisplayPanelFeature AIDL registration
-service list | grep -i displaypanel
-# Expected: vendor.oplus.hardware.displaypanelfeature.IDisplayPanelFeature/default
-```
-
-If all 4 commands check out, your baked ROM is fully functional!
-
----
-
-## License
-
-This project is open-source software licensed under the [Apache License, Version 2.0](../LICENSE).
+After running the script, repack your `system.img`, `vendor.img`, `odm.img` (or `super.img`) and flash!
