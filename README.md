@@ -23,6 +23,7 @@ Achieves full OEM-grade FOD unlock, instant optical highlight turn-off, zero loc
 | SOFOD | Fingerprint unlock while the display is off. |
 | SOFOD hint | Fingerprint icon appears on the screen-off display when needed. |
 | Rise to wake | A gentle lift wakes the lock screen and keeps the SOFOD hint working. |
+| Jiiov idle FOD touch | After unlock, Jiiov FOD touch is disarmed on the screen-on launcher so stray presses do not illuminate LHBM; screen-off and new biometric sessions re-arm it. Goodix FOD behavior is unchanged. |
 | AOD | All three ColorOS AOD modes work, including All day and Power saving; the vendor Doze overlay supplies the framework Doze service and light sensor resources. |
 
 The Rise to wake fix is on current `main`; the earlier `v4.0-working-final` tag does not include it.
@@ -85,7 +86,7 @@ Rodin uses separate components for the touchscreen and optical fingerprint senso
 
 * **Dynamic Hardware Routing:** Rather than writing to fixed sysfs nodes, `librodin_fp_compat.so` binds to Xiaomi's hardware abstraction layer `vendor.xiaomi.hw.touchfeature.ITouchFeature/default` (Transaction 9, mode 10, value 1). Xiaomi's HAL automatically routes the FOD touch enable command to whichever touch IC is active.
 * **Adaptive Edge Polling:** Drivers like FocalTech do not always emit standard Linux input key events (`KEY_FOD_GESTURE_DOWN`) or sysfs notifications. The compatibility worker polls both input device events and `/sys/class/touch/touch_dev/fod_press_status` with an adaptive 15–25ms active window to ensure instantaneous touch down/up detection on both Goodix and FocalTech hardware.
-* **Jiiov FOD:** FOD operation is confirmed on a Rodin unit with a Jiiov fingerprint sensor using the current build. The compatibility layer relies on Xiaomi's fingerprint and touch interfaces, without a Jiiov-specific branch.
+* **Jiiov FOD:** A Rodin unit with Jiiov FOD confirmed the screen-on idle-touch fix. The compatibility layer checks `persist.vendor.sys.fp.vendor`, disarms touch after Jiiov authentication while the display is on, and re-arms for screen-off or a new fingerprint operation. Goodix FOD follows the existing path; the touch controller can be Goodix or FocalTech.
 
 ### 4. Seamless & Classic AOD Fix (Panel Feature 217)
 * ColorOS `SmoothTransitionController` queries and sets panel feature `217` (`OPLUS_FEATURE_AOD_SMOOTH`).

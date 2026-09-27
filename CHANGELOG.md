@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-27 - Jiiov FOD idle-touch fix
+
+- On Jiiov FOD, disarm idle screen-on fingerprint touch after unlock to prevent stray LHBM illumination; re-arm for screen-off use or a new biometric operation. Goodix FOD retains its previous behavior.
+- Update the tracked Rodin FOD library to the tested build. Installed SHA-256: `b6f4f8cee751d122bd5fe04455584e629d497fcc8d7bc8ebefb9d29e29bc20d1`.
+- Refresh the NEES4 signature for the current sensor HAL, AOD daemon, FOD library, and system property file on the installed ROM; verification passes after reboot.
+
 ## 2026-09-27 - Rodin AOD Doze overlay source
 
 - Reconstructed the static framework RRO source from the installed `/vendor/overlay/RodinAodDozeOverlay.apk` and included the known-working APK in the ROM bake inputs.
