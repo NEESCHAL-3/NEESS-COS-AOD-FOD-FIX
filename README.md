@@ -8,7 +8,7 @@
 
 Native under-display fingerprint (FOD) and Always-On Display (AOD) hardware compatibility layer for **POCO X7 Pro (Rodin)** running ColorOS ports. 
 
-The Rodin sensor wrapper also supports Rise to wake on ColorOS 17 using Xiaomi pickup events while retaining the screen-off fingerprint hint. See [sensor/README.md](sensor/README.md) for the tested build and behavior.
+The Rodin sensor wrapper also supports Rise to wake on ColorOS using Xiaomi pickup events while retaining the screen-off fingerprint hint. See [sensor/README.md](sensor/README.md) for the tested build and behavior.
 
 Achieves full OEM-grade FOD unlock, instant optical highlight turn-off, zero lockscreen dimming, seamless animations, and AOD modes **without patching ColorOS SystemUI bytecode** and **without requiring root / Magisk / KernelSU**.
 
@@ -67,7 +67,7 @@ ColorOS AIDL Interfaces        Xiaomi Hardware Path   Display & Panel
 ### 5. Screen-Off Fingerprint (SOFOD) Hint Integration
 * When AOD is disabled or enters energy-saving hide (`DOZE->OFF`), `nees_aodd` toggles `Setting_AodSwitchEnable` to `0`. This informs ColorOS `OnScreenFingerprintUiMech` that AOD is inactive, enabling the screen-off fingerprint icon to appear on pickup or screen tap (`notifyWakeUpCallback type 1`).
 * On touch or pickup callback, `nees_aodd` immediately ramps panel brightness to `100` for clear FOD icon visibility, dropping to `0` when the icon hides, and restoring `Setting_AodSwitchEnable = 1` when the screen wakes to `ON`.
-* **Rise to wake on ColorOS 17:** The sensor wrapper maps Xiaomi pickup events to the tilt value expected by ColorOS's gesture service. It batches Xiaomi pickup before activation and leaves native FOD and AOD events untouched. No ColorOS app patch is required. The installed build passed three gentle lock-and-lift cycles with the SOFOD hint working.
+* **Rise to wake on ColorOS:** The sensor wrapper maps Xiaomi pickup events to the tilt value expected by ColorOS's gesture service. It batches Xiaomi pickup before activation and leaves native FOD and AOD events untouched. No ColorOS app patch is required. The installed build passed three gentle lock-and-lift cycles with the SOFOD hint working.
 
 ### 6. Zero-Fork AOD Keepalive (Watchdog Crash Prevention)
 * `nees_aodd` operates on **pure in-memory string matching** on the logcat stream with zero subprocess forks. Panel backlight is held at 28 during `DOZE_SUSPEND` and `performAodUpdate` without system overhead, preventing Android process watchdogs (`MBrainServer`) from killing the daemon.

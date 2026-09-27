@@ -4,7 +4,7 @@ The wrapper at `/vendor/lib64/hw/sensors.mt6899.so` bridges Xiaomi Rodin's picku
 
 When ColorOS enables tilt, the wrapper batches and activates Xiaomi pickup, then sends a tilt event with value `0` on a pickup event with value `1`. This matches the value expected by `ScreenOffGestureService`. The wrapper leaves FOD, AOD, significant motion, and hand sensor activation and events with the native HAL. The synthetic sensor uses Xiaomi pickup only, so its state does not disable other sensors.
 
-Build with `./sensor/build.sh` using Android NDK r30. The tested build is installed directly on the Rodin ColorOS 17 vendor partition. SHA-256 of the tested `sensors.mt6899.so`:
+Build with `./sensor/build.sh` using Android NDK r30. The tested build is installed directly on the Rodin ColorOS vendor partition. SHA-256 of the tested `sensors.mt6899.so`:
 
 `f9e74b38b50cd06f1764e95fb4de79852a3e1301a61024d564111afbbca3d14f`
 

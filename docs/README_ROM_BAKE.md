@@ -1,6 +1,6 @@
 # POCO X7 Pro (Rodin) - ROM Bake-In Installer (TEST 4.0 Final)
 
-Native ColorOS 15 AOD & Optical FOD Hardware Compatibility Layer for **POCO X7 Pro (Rodin)**.
+Native ColorOS AOD & Optical FOD Hardware Compatibility Layer for **POCO X7 Pro (Rodin)**.
 
 This kit bakes all fixes directly into your unpacked ROM partitions (`system`, `vendor`, `odm`).
 **No root, Magisk, or KernelSU required** on the flashed device. Works 100% out-of-the-box on clean flash with **100% Pure Strict Enforcing SELinux** (zero permissive domains).
@@ -23,7 +23,7 @@ This kit bakes all fixes directly into your unpacked ROM partitions (`system`, `
    - Full compliance with Google Play Integrity / CTS / banking apps.
 5. **Seamless & Classic AOD**:
    - Full-day AOD and energy-saving modes supported without watchdog crashes.
-6. **Rise to Wake (ColorOS 17)**:
+6. **Rise to Wake (ColorOS)**:
    - The vendor sensor wrapper turns Xiaomi pickup events into the tilt events expected by ColorOS while preserving the screen-off fingerprint hint.
    - Tested HAL SHA-256: `f9e74b38b50cd06f1764e95fb4de79852a3e1301a61024d564111afbbca3d14f`.
 

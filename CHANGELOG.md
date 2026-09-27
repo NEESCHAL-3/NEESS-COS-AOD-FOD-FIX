@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-09-27 - Rise to wake on Rodin ColorOS 17
+## 2026-09-27 - Rise to wake on Rodin ColorOS
 
 - Route ColorOS tilt sensor requests to Xiaomi pickup with the required batch-before-activate sequence.
 - Deliver pickup events as tilt value `0` so `ScreenOffGestureService` wakes the display on gentle lifts.
