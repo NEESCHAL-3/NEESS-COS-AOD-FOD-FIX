@@ -56,9 +56,10 @@ ColorOS AIDL Interfaces        Xiaomi Hardware Path   Display & Panel
   2. Responds to Feature 211 (`OPLUS_FEATURE_UDFPS_TYPE`) with `0x410` (`OPLUS_UDFPS_LOCAL_HBM | OPLUS_UDFPS_LOCAL_HBM_ACCEL`).
   3. SystemUI receives `isLocalHBM = 410` (true), completely destroying `OnScreenFingerprintDimLayer`. The lockscreen remains at 100% full brightness and vibrant, with zero black box.
 
-### 3. Dual Touchscreen Backend Support: Goodix + FocalTech
+### 3. Touchscreen Backend Support
 * **Dynamic Hardware Routing:** Rather than writing to fixed sysfs nodes, `librodin_fp_compat.so` binds to Xiaomi's hardware abstraction layer `vendor.xiaomi.hw.touchfeature.ITouchFeature/default` (Transaction 9, mode 10, value 1). Xiaomi's HAL automatically routes the FOD touch enable command to whichever touch IC is active.
 * **Adaptive Edge Polling:** Drivers like FocalTech do not always emit standard Linux input key events (`KEY_FOD_GESTURE_DOWN`) or sysfs notifications. The compatibility worker polls both input device events and `/sys/class/touch/touch_dev/fod_press_status` with an adaptive 15–25ms active window to ensure instantaneous touch down/up detection on both Goodix and FocalTech hardware.
+* **Jiiov field report:** One user confirmed that FOD is working properly on a Jiiov device with this build. The compatibility layer has no Jiiov-specific code path; this is a user report for one device, not a broad hardware validation.
 
 ### 4. Seamless & Classic AOD Fix (Panel Feature 217)
 * ColorOS `SmoothTransitionController` queries and sets panel feature `217` (`OPLUS_FEATURE_AOD_SMOOTH`).

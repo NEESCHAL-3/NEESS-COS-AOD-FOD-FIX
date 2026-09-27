@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-27 - Jiiov FOD field report
+
+- One user confirmed working FOD on a Jiiov device with the current build.
+- No Jiiov-specific source change was needed; broader Jiiov hardware coverage remains unverified.
+
 ## 2026-09-27 - Rise to wake on Rodin ColorOS
 
 - Route ColorOS tilt sensor requests to Xiaomi pickup with the required batch-before-activate sequence.
