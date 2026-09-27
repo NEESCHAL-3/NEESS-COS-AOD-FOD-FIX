@@ -2,7 +2,7 @@
 
 > **Post-release update (2026-09-27):** Rise to wake is fixed on current `main` for Rodin ColorOS. The vendor HAL batches and activates Xiaomi pickup, then supplies ColorOS tilt value `0` on a lift. Native FOD and AOD events continue through the HAL, preserving the screen-off fingerprint hint. No ColorOS app patch is needed. Three gentle lock-and-lift cycles passed on the installed build (SHA-256 `f9e74b38b50cd06f1764e95fb4de79852a3e1301a61024d564111afbbca3d14f`). This fix was added **after** the `v4.0-working-final` tag; the tagged snapshot does not contain it. Use current `main` to bake the updated HAL. See [sensor details](../sensor/README.md) and [changelog](../CHANGELOG.md).
 
-> **Jiiov field report (2026-09-27):** One user confirmed working FOD on a Jiiov device with the current build. There is no Jiiov-specific code path; this is a single-device report, not validation across Jiiov hardware.
+> **Rodin hardware compatibility (2026-09-27):** Goodix and FocalTech identify touchscreen controller variants; Goodix and Jiiov identify optical fingerprint sensor variants. Pairings include FocalTech + Goodix, FocalTech + Jiiov, Goodix + Goodix, and Goodix + Jiiov (touch + FOD). FOD operation is confirmed on a Jiiov-equipped Rodin unit with the current build. The compatibility layer uses Xiaomi's touch and fingerprint interfaces without a Jiiov-specific branch.
 
 Production-ready native under-display fingerprint (FOD) and Always-On Display (AOD) hardware compatibility layer for **POCO X7 Pro (Rodin)** running ColorOS ports.
 

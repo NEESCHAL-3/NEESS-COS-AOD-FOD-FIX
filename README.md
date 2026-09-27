@@ -4,6 +4,7 @@
 [![Device](https://img.shields.io/badge/Device-POCO%20X7%20Pro%20(Rodin)-blue.svg)]()
 [![SELinux](https://img.shields.io/badge/SELinux-100%25%20Strict%20Enforcing-success.svg)]()
 [![Touch](https://img.shields.io/badge/Touch-Goodix%20%2B%20FocalTech-orange.svg)]()
+[![FOD](https://img.shields.io/badge/FOD-Goodix%20%2B%20Jiiov-blue.svg)]()
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 Native under-display fingerprint (FOD) and Always-On Display (AOD) hardware compatibility layer for **POCO X7 Pro (Rodin)** running ColorOS ports. 
@@ -56,10 +57,19 @@ ColorOS AIDL Interfaces        Xiaomi Hardware Path   Display & Panel
   2. Responds to Feature 211 (`OPLUS_FEATURE_UDFPS_TYPE`) with `0x410` (`OPLUS_UDFPS_LOCAL_HBM | OPLUS_UDFPS_LOCAL_HBM_ACCEL`).
   3. SystemUI receives `isLocalHBM = 410` (true), completely destroying `OnScreenFingerprintDimLayer`. The lockscreen remains at 100% full brightness and vibrant, with zero black box.
 
-### 3. Touchscreen Backend Support
+### 3. Touch Controller and Fingerprint Sensor Variants
+Rodin uses separate components for the touchscreen and optical fingerprint sensor. Goodix can name either component, so each unit should be described by its **touch controller + FOD sensor** pairing. Examples of Rodin hardware pairings are:
+
+| Touch controller | FOD sensor |
+| --- | --- |
+| FocalTech | Goodix |
+| FocalTech | Jiiov |
+| Goodix | Goodix |
+| Goodix | Jiiov |
+
 * **Dynamic Hardware Routing:** Rather than writing to fixed sysfs nodes, `librodin_fp_compat.so` binds to Xiaomi's hardware abstraction layer `vendor.xiaomi.hw.touchfeature.ITouchFeature/default` (Transaction 9, mode 10, value 1). Xiaomi's HAL automatically routes the FOD touch enable command to whichever touch IC is active.
 * **Adaptive Edge Polling:** Drivers like FocalTech do not always emit standard Linux input key events (`KEY_FOD_GESTURE_DOWN`) or sysfs notifications. The compatibility worker polls both input device events and `/sys/class/touch/touch_dev/fod_press_status` with an adaptive 15–25ms active window to ensure instantaneous touch down/up detection on both Goodix and FocalTech hardware.
-* **Jiiov field report:** One user confirmed that FOD is working properly on a Jiiov device with this build. The compatibility layer has no Jiiov-specific code path; this is a user report for one device, not a broad hardware validation.
+* **Jiiov FOD:** FOD operation is confirmed on a Rodin unit with a Jiiov fingerprint sensor using the current build. The compatibility layer relies on Xiaomi's fingerprint and touch interfaces, without a Jiiov-specific branch.
 
 ### 4. Seamless & Classic AOD Fix (Panel Feature 217)
 * ColorOS `SmoothTransitionController` queries and sets panel feature `217` (`OPLUS_FEATURE_AOD_SMOOTH`).

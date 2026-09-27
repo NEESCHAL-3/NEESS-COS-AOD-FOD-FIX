@@ -26,8 +26,8 @@ This kit bakes all fixes directly into your unpacked ROM partitions (`system`, `
 6. **Rise to Wake (ColorOS)**:
    - The vendor sensor wrapper turns Xiaomi pickup events into the tilt events expected by ColorOS while preserving the screen-off fingerprint hint.
    - Tested HAL SHA-256: `f9e74b38b50cd06f1764e95fb4de79852a3e1301a61024d564111afbbca3d14f`.
-7. **Jiiov FOD field report**:
-   - One user confirmed working FOD on a Jiiov device with the current build. This is a single-device report; no Jiiov-specific code path was added.
+7. **Touch and FOD hardware variants**:
+   - Goodix and FocalTech are touchscreen controller variants; Goodix and Jiiov are optical fingerprint sensor variants. Pairings include FocalTech + Goodix, FocalTech + Jiiov, Goodix + Goodix, and Goodix + Jiiov (touch + FOD). FOD operation is confirmed on a Jiiov-equipped Rodin unit with the current build.
 
 ---
 

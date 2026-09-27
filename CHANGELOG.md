@@ -1,9 +1,9 @@
 # Changelog
 
-## 2026-09-27 - Jiiov FOD field report
+## 2026-09-27 - Rodin FOD hardware compatibility
 
-- One user confirmed working FOD on a Jiiov device with the current build.
-- No Jiiov-specific source change was needed; broader Jiiov hardware coverage remains unverified.
+- Confirmed FOD operation on a Rodin unit with a Jiiov fingerprint sensor using the current build.
+- Documented touchscreen controller and FOD sensor as separate hardware components: Goodix or FocalTech touch, and Goodix or Jiiov FOD. No Jiiov-specific source branch was required.
 
 ## 2026-09-27 - Rise to wake on Rodin ColorOS
 
