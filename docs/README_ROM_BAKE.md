@@ -74,6 +74,9 @@ Example:
 9. Updates `plat_file_contexts` and `vendor_file_contexts` for image repackers (`erofs`/`ext4`).
 10. Appends optimized FOD/AOD properties to `system/build.prop`.
 11. Installs the tested `vendor/lib64/hw/sensors.mt6899.so` for Rise to wake and the screen-off fingerprint hint.
+12. Installs `vendor/overlay/RodinAodDozeOverlay.apk` for the framework Doze service and light sensor mappings used by ColorOS AOD.
+
+The [Doze overlay source](../overlay/RodinAodDozeOverlay/README.md) is included. On the current framework, `config_dozeComponent` and `config_displayLightSensorType` map successfully; `config_dozeAfterScreenOff` is absent and ignored. After flashing, verify with `adb shell cmd overlay dump com.rodin.aoddoze.overlay`.
 
 ---
 

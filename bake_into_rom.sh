@@ -83,6 +83,18 @@ if [ -f "$SCRIPT_DIR/vendor/lib64/hw/sensors.mt6899.so" ]; then
   chcon u:object_r:vendor_file:s0 "$VEN_DIR/lib64/hw/sensors.mt6899.so" 2>/dev/null || true
 fi
 
+# Install the framework Doze RRO used by ColorOS AOD.
+DOZE_OVERLAY="$SRC_DIR/vendor/overlay/RodinAodDozeOverlay.apk"
+if [ ! -f "$DOZE_OVERLAY" ]; then
+  echo "Error: Missing required Doze overlay: $DOZE_OVERLAY" >&2
+  exit 1
+fi
+echo "-> Installing RodinAodDozeOverlay.apk to $VEN_DIR/overlay/"
+mkdir -p "$VEN_DIR/overlay"
+cp -f "$DOZE_OVERLAY" "$VEN_DIR/overlay/RodinAodDozeOverlay.apk"
+chmod 644 "$VEN_DIR/overlay/RodinAodDozeOverlay.apk"
+chcon u:object_r:vendor_overlay_file:s0 "$VEN_DIR/overlay/RodinAodDozeOverlay.apk" 2>/dev/null || true
+
 # 4. Patch mfp-daemon ELF DT_NEEDED (Permanent boot loading without LD_PRELOAD)
 echo "-> [4/8] Baking librodin_fp_compat.so into $VEN_DIR/bin/hw/mfp-daemon ELF header..."
 if [ -f "$VEN_DIR/bin/hw/mfp-daemon" ]; then
@@ -164,6 +176,10 @@ if [ -f "$VEN_FC" ]; then
   if ! grep -q "librodin_fp_compat" "$VEN_FC"; then
     cat "$SCRIPT_DIR/sepolicy/vendor_file_contexts.append" >> "$VEN_FC"
     echo "   [OK] Appended labels to $VEN_FC"
+  fi
+  if ! grep -q "RodinAodDozeOverlay" "$VEN_FC"; then
+    echo '/vendor/overlay/RodinAodDozeOverlay\.apk u:object_r:vendor_overlay_file:s0' >> "$VEN_FC"
+    echo "   [OK] Appended Doze overlay label to $VEN_FC"
   fi
 fi
 

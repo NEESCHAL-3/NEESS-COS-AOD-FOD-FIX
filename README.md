@@ -23,9 +23,11 @@ Achieves full OEM-grade FOD unlock, instant optical highlight turn-off, zero loc
 | SOFOD | Fingerprint unlock while the display is off. |
 | SOFOD hint | Fingerprint icon appears on the screen-off display when needed. |
 | Rise to wake | A gentle lift wakes the lock screen and keeps the SOFOD hint working. |
-| AOD | All three ColorOS AOD modes work, including All day and Power saving. |
+| AOD | All three ColorOS AOD modes work, including All day and Power saving; the vendor Doze overlay supplies the framework Doze service and light sensor resources. |
 
 The Rise to wake fix is on current `main`; the earlier `v4.0-working-final` tag does not include it.
+
+The [Rodin AOD Doze overlay source](overlay/RodinAodDozeOverlay/README.md) and the installed APK are included for ROM baking. The current framework maps its two string resources; its `config_dozeAfterScreenOff` boolean is absent from this framework and has no effect.
 
 ---
 

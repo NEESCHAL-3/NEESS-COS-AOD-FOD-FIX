@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.rodin.aoddoze.overlay"
+    android:versionCode="35"
+    android:versionName="15">
+    <uses-sdk android:minSdkVersion="35" android:targetSdkVersion="35" />
+    <overlay
+        android:targetPackage="android"
+        android:isStatic="true"
+        android:priority="999" />
+    <application android:hasCode="false" />
+</manifest>

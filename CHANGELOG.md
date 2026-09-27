@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-27 - Rodin AOD Doze overlay source
+
+- Reconstructed the static framework RRO source from the installed `/vendor/overlay/RodinAodDozeOverlay.apk` and included the known-working APK in the ROM bake inputs.
+- Bake the overlay into `/vendor/overlay/` and label it `vendor_overlay_file`.
+- Confirmed `config_dozeComponent` and `config_displayLightSensorType` are mapped. The APK's `config_dozeAfterScreenOff` has no matching resource in the current framework, so it is not active.
+
 ## 2026-09-27 - Rodin FOD hardware compatibility
 
 - Confirmed FOD operation on a Rodin unit with a Jiiov fingerprint sensor using the current build.
