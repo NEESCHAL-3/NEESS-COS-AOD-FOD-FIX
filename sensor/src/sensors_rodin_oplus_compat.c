@@ -220,6 +220,7 @@ static inject_fn g_orig_inject;
 
 static int g_pickup_enabled;
 static int g_synth_enabled;
+static int g_tilt_enabled;
 
 static sensors_event_t *g_scratch;
 static size_t g_scratch_cap;
@@ -229,8 +230,6 @@ static size_t g_scratch_cap;
 static sensors_event_t g_pending[PENDING_MAX];
 static unsigned g_pending_head;
 static unsigned g_pending_count;
-
-static unsigned g_synth_event_log_count;
 
 static void load_real_once(void)
 {
@@ -552,11 +551,7 @@ static int compat_activate(
 
     if (handle != g_synth_handle &&
         handle != g_pickup_handle &&
-        handle != g_tilt_handle &&
-        handle != g_fod_handle &&
-        handle != g_aod_handle &&
-        handle != g_smd_handle &&
-        handle != g_hand_handle) {
+        handle != g_tilt_handle) {
 
         return g_orig_activate(
             dev,
@@ -572,25 +567,32 @@ static int compat_activate(
     int old_synth =
         g_synth_enabled;
 
+    int old_tilt =
+        g_tilt_enabled;
+
     int old_real =
         old_pickup ||
-        old_synth;
+        old_synth ||
+        old_tilt;
 
-    if (handle ==
-        g_synth_handle) {
+    int rc = 0;
+
+    if (handle == g_synth_handle) {
 
         g_synth_enabled =
             enabled;
     } else if (handle == g_pickup_handle) {
         g_pickup_enabled =
             enabled;
+    } else if (handle == g_tilt_handle) {
+        g_tilt_enabled =
+            enabled;
     }
 
     int new_real =
         g_pickup_enabled ||
-        g_synth_enabled;
-
-    int rc = 0;
+        g_synth_enabled ||
+        g_tilt_enabled;
 
     if (old_real != new_real) {
         if (g_pickup_handle >= 0) {
@@ -602,60 +604,25 @@ static int compat_activate(
             if (rc == 0) rc = r;
         }
 
-        if (g_tilt_handle >= 0) {
-            int r = g_orig_activate(
-                dev,
-                g_tilt_handle,
-                new_real);
-            LOGI("activate tilt handle=%d -> rc=%d", g_tilt_handle, r);
-        }
-
-        if (g_fod_handle >= 0) {
-            int r = g_orig_activate(
-                dev,
-                g_fod_handle,
-                new_real);
-            LOGI("activate fod handle=%d -> rc=%d", g_fod_handle, r);
-        }
-
-        if (g_aod_handle >= 0) {
-            int r = g_orig_activate(
-                dev,
-                g_aod_handle,
-                new_real);
-            LOGI("activate aod handle=%d -> rc=%d", g_aod_handle, r);
-        }
-
-        if (g_smd_handle >= 0) {
-            int r = g_orig_activate(
-                dev,
-                g_smd_handle,
-                new_real);
-            LOGI("activate smd handle=%d -> rc=%d", g_smd_handle, r);
-        }
-
-        if (g_hand_handle >= 0) {
-            int r = g_orig_activate(
-                dev,
-                g_hand_handle,
-                new_real);
-            LOGI("activate hand handle=%d -> rc=%d", g_hand_handle, r);
-        }
-
         if (rc != 0 && g_pickup_handle >= 0) {
             g_pickup_enabled =
                 old_pickup;
 
             g_synth_enabled =
                 old_synth;
+
+            g_tilt_enabled =
+                old_tilt;
+
         }
     }
 
-    LOGI("activate handle=%d enabled=%d pickupLogical=%d synthLogical=%d real=%d rc=%d (tilt=%d fod=%d aod=%d smd=%d hand=%d)",
+    LOGI("activate handle=%d enabled=%d pickupLogical=%d synthLogical=%d tiltLogical=%d real=%d rc=%d (tilt=%d fod=%d aod=%d smd=%d hand=%d)",
          handle,
          enabled,
          g_pickup_enabled,
          g_synth_enabled,
+         g_tilt_enabled,
          new_real,
          rc,
          g_tilt_handle,
@@ -677,24 +644,8 @@ static int compat_setDelay(
     if (!g_orig_setDelay)
         return -EINVAL;
 
-    if (handle ==
-        g_synth_handle) {
-
-        if (g_tilt_handle >= 0) {
-            g_orig_setDelay(dev, g_tilt_handle, ns);
-        }
-        if (g_fod_handle >= 0) {
-            g_orig_setDelay(dev, g_fod_handle, ns);
-        }
-        if (g_aod_handle >= 0) {
-            g_orig_setDelay(dev, g_aod_handle, ns);
-        }
-        if (g_smd_handle >= 0) {
-            g_orig_setDelay(dev, g_smd_handle, ns);
-        }
-        if (g_hand_handle >= 0) {
-            g_orig_setDelay(dev, g_hand_handle, ns);
-        }
+    if (handle == g_synth_handle ||
+        handle == g_tilt_handle) {
 
         handle =
             g_pickup_handle;
@@ -716,24 +667,8 @@ static int compat_batch(
     if (!g_orig_batch)
         return -EINVAL;
 
-    if (handle ==
-        g_synth_handle) {
-
-        if (g_tilt_handle >= 0) {
-            g_orig_batch(dev, g_tilt_handle, flags, sampling_ns, latency_ns);
-        }
-        if (g_fod_handle >= 0) {
-            g_orig_batch(dev, g_fod_handle, flags, sampling_ns, latency_ns);
-        }
-        if (g_aod_handle >= 0) {
-            g_orig_batch(dev, g_aod_handle, flags, sampling_ns, latency_ns);
-        }
-        if (g_smd_handle >= 0) {
-            g_orig_batch(dev, g_smd_handle, flags, sampling_ns, latency_ns);
-        }
-        if (g_hand_handle >= 0) {
-            g_orig_batch(dev, g_hand_handle, flags, sampling_ns, latency_ns);
-        }
+    if (handle == g_synth_handle ||
+        handle == g_tilt_handle) {
 
         handle =
             g_pickup_handle;
@@ -858,6 +793,9 @@ static int compat_poll(
     int synth_logical =
         g_synth_enabled;
 
+    int tilt_logical =
+        g_tilt_enabled;
+
     int written = 0;
 
     for (int i = 0;
@@ -877,35 +815,11 @@ static int compat_poll(
              ev.sensor ==
                 g_tilt_handle);
 
-        int is_fod =
-            (g_fod_handle >= 0 &&
-             ev.sensor ==
-                g_fod_handle);
+        if (!is_pickup) {
+            /* Oplus expects 0 for lift; the MTK tilt detector emits 1. */
+            if (is_tilt && ev.data[0] > 0.0f)
+                ev.data[0] = 0.0f;
 
-        int is_aod =
-            (g_aod_handle >= 0 &&
-             ev.sensor ==
-                g_aod_handle);
-
-        int is_smd =
-            (g_smd_handle >= 0 &&
-             ev.sensor ==
-                g_smd_handle);
-
-        int is_hand =
-            (g_hand_handle >= 0 &&
-             ev.sensor ==
-                g_hand_handle);
-
-        int is_our_sensor =
-            is_pickup ||
-            is_tilt ||
-            is_fod ||
-            is_aod ||
-            is_smd ||
-            is_hand;
-
-        if (!is_our_sensor) {
             if (written < count)
                 out[written++] = ev;
 
@@ -923,57 +837,16 @@ static int compat_poll(
             out[written++] = ev;
         }
 
-        /*
-         * ULTRA-SENSITIVE ZERO-EFFORT PICKUP ENGINE:
-         *
-         * Bridges:
-         * 1) Xiaomi Pickup sensor (data[0] > 0.0f)
-         * 2) MediaTek Tilt detector (data[0] > 0.0f)
-         * 3) Xiaomi FOD Wakeup (fires on finger approach / pickup)
-         * 4) Xiaomi AOD Wakeup (fires on pickup / movement)
-         * 5) MediaTek Significant Motion Detector (fires on ANY movement off flat surface)
-         * 6) Xiaomi IMU Hand detect (fires on hand grasp)
-         *
-         * ColorOS synthetic 65611 expects:
-         *   value 0.0 = wake/pickup callback
-         */
-        if (synth_logical) {
-            int trigger = 0;
-            const char *src = "unknown";
-
-            if (is_pickup && ev.data[0] > 0.0f) {
-                trigger = 1;
-                src = "pickup";
-            } else if (is_tilt && ev.data[0] > 0.0f) {
-                trigger = 1;
-                src = "tilt";
-            } else if (is_fod) {
-                trigger = 1;
-                src = "fod_wakeup";
-            } else if (is_aod) {
-                trigger = 1;
-                src = "aod_wakeup";
-            } else if (is_smd && ev.data[0] > 0.0f) {
-                trigger = 1;
-                src = "smd";
-                // SMD is one-shot; re-arm it
-                if (dev && g_orig_activate) {
-                    g_orig_activate(dev, g_smd_handle, 1);
-                }
-            } else if (is_hand && ev.data[0] > 0.0f) {
-                trigger = 1;
-                src = "imu_hand";
-            }
-
-            if (trigger) {
+        /* Xiaomi pickup fires on gentler motion than MTK tilt. */
+        if (ev.data[0] == 1.0f && (synth_logical || tilt_logical)) {
                 sensors_event_t syn =
                     ev;
 
                 syn.sensor =
-                    g_synth_handle;
+                    tilt_logical ? g_tilt_handle : g_synth_handle;
 
                 syn.type =
-                    OPLUS_TILT_TYPE;
+                    tilt_logical ? MTK_TILT_TYPE : OPLUS_TILT_TYPE;
 
                 memset(
                     syn.data,
@@ -988,18 +861,20 @@ static int compat_poll(
                         &syn);
                 }
 
-                if (g_synth_event_log_count <
-                    100) {
+                LOGI("instant pickup trigger (handle=%d val=%.1f) -> tilt type=%d value=0 ts=%" PRId64,
+                     ev.sensor,
+                     ev.data[0],
+                     syn.type,
+                     syn.timestamp);
 
-                    LOGI("instant pickup trigger (src=%s handle=%d val=%.1f) -> synthetic 65611 value=0 ts=%" PRId64,
-                         src,
-                         ev.sensor,
-                         ev.data[0],
-                         syn.timestamp);
-
-                    ++g_synth_event_log_count;
+                if (tilt_logical && synth_logical) {
+                    syn.sensor = g_synth_handle;
+                    syn.type = OPLUS_TILT_TYPE;
+                    if (written < count)
+                        out[written++] = syn;
+                    else
+                        queue_pending_locked(&syn);
                 }
-            }
         }
     }
 
@@ -1063,6 +938,7 @@ static int compat_close(
 
         g_pickup_enabled = 0;
         g_synth_enabled = 0;
+        g_tilt_enabled = 0;
 
         g_pending_head = 0;
         g_pending_count = 0;

@@ -8,6 +8,8 @@
 
 Native under-display fingerprint (FOD) and Always-On Display (AOD) hardware compatibility layer for **POCO X7 Pro (Rodin)** running ColorOS ports. 
 
+The Rodin sensor wrapper also supports Rise to wake on ColorOS 17 using Xiaomi pickup events while retaining the screen-off fingerprint hint. See [sensor/README.md](sensor/README.md) for the tested build and behavior.
+
 Achieves full OEM-grade FOD unlock, instant optical highlight turn-off, zero lockscreen dimming, seamless animations, and AOD modes **without patching ColorOS SystemUI bytecode** and **without requiring root / Magisk / KernelSU**.
 
 ---
