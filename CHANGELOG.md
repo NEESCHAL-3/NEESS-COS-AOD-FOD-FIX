@@ -5,6 +5,7 @@
 - Route ColorOS tilt sensor requests to Xiaomi pickup with the required batch-before-activate sequence.
 - Deliver pickup events as tilt value `0` so `ScreenOffGestureService` wakes the display on gentle lifts.
 - Preserve native FOD, AOD, significant motion, and hand sensor requests and events, keeping the screen-off fingerprint hint functional.
+- Update the tracked `vendor/lib64/hw/sensors.mt6899.so` used by `bake_into_rom.sh` to the tested build.
 - Tested three consecutive gentle lock-and-lift cycles on the installed vendor HAL.
 - Installed sensor HAL SHA-256: `f9e74b38b50cd06f1764e95fb4de79852a3e1301a61024d564111afbbca3d14f`.
 

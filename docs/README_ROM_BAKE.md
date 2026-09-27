@@ -23,6 +23,9 @@ This kit bakes all fixes directly into your unpacked ROM partitions (`system`, `
    - Full compliance with Google Play Integrity / CTS / banking apps.
 5. **Seamless & Classic AOD**:
    - Full-day AOD and energy-saving modes supported without watchdog crashes.
+6. **Rise to Wake (ColorOS 17)**:
+   - The vendor sensor wrapper turns Xiaomi pickup events into the tilt events expected by ColorOS while preserving the screen-off fingerprint hint.
+   - Tested HAL SHA-256: `f9e74b38b50cd06f1764e95fb4de79852a3e1301a61024d564111afbbca3d14f`.
 
 ---
 
@@ -54,6 +57,7 @@ Example:
 8. Safely renames stale `precompiled_sepolicy` so init compiles fresh CIL policy on first boot.
 9. Updates `plat_file_contexts` and `vendor_file_contexts` for image repackers (`erofs`/`ext4`).
 10. Appends optimized FOD/AOD properties to `system/build.prop`.
+11. Installs the tested `vendor/lib64/hw/sensors.mt6899.so` for Rise to wake and the screen-off fingerprint hint.
 
 ---
 
