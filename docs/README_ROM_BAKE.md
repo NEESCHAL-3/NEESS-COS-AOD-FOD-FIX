@@ -7,6 +7,20 @@ This kit bakes all fixes directly into your unpacked ROM partitions (`system`, `
 
 ---
 
+## Working features on current `main`
+
+| Feature | Result |
+| --- | --- |
+| FOD | Under-display fingerprint unlock across supported touch and FOD variants. |
+| SOFOD | Fingerprint unlock with the display off. |
+| SOFOD hint | Screen-off fingerprint icon appears when needed. |
+| Rise to wake | Gentle lifts wake the lock screen without breaking the SOFOD hint. |
+| AOD | All three ColorOS modes, including All day and Power saving. |
+
+Rise to wake was added after the `v4.0-working-final` tag. Use current `main` for this complete set of fixes.
+
+---
+
 ## What's Included & Fixed in TEST 4.0 Final
 
 1. **Instant LHBM Off on Unlock (OEM Match)**:

@@ -15,6 +15,20 @@ Achieves full OEM-grade FOD unlock, instant optical highlight turn-off, zero loc
 
 ---
 
+## Working fixes
+
+| Feature | Result |
+| --- | --- |
+| FOD | Under-display fingerprint unlock, including Goodix and Jiiov FOD sensors. |
+| SOFOD | Fingerprint unlock while the display is off. |
+| SOFOD hint | Fingerprint icon appears on the screen-off display when needed. |
+| Rise to wake | A gentle lift wakes the lock screen and keeps the SOFOD hint working. |
+| AOD | All three ColorOS AOD modes work, including All day and Power saving. |
+
+The Rise to wake fix is on current `main`; the earlier `v4.0-working-final` tag does not include it.
+
+---
+
 ## Architecture Overview
 
 ```text
