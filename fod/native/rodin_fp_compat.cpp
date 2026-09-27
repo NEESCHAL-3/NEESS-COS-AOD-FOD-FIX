@@ -63,6 +63,7 @@ private:
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <strings.h>
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <linux/input.h>
@@ -138,6 +139,17 @@ enum : int32_t {
 };
 
 static std::atomic<int32_t> gFpOperation{FP_OP_NONE};
+static std::atomic<int32_t> gScreenState{1};
+static std::atomic<bool> gJiiovAuthCompleted{false};
+
+static bool isJiiovFod() {
+    static const bool detected = [] {
+        char vendor[PROP_VALUE_MAX] = {};
+        __system_property_get("persist.vendor.sys.fp.vendor", vendor);
+        return strncasecmp(vendor, "jiiov", 5) == 0;
+    }();
+    return detected;
+}
 
 static std::atomic<int32_t> gLastEnrollRemaining{-1};
 
@@ -746,6 +758,12 @@ static std::atomic<bool> gAuthSucceededFlag{false};
 static std::chrono::steady_clock::time_point gAuthSucceededTime{};
 
 static void handleFodDown(const char* source, bool force = false) {
+    // Jiiov must not forward idle scanner touches to ColorOS after unlock.
+    if (isJiiovFod() && gScreenState.load() == 1 &&
+        gJiiovAuthCompleted.load()) {
+        return;
+    }
+
     if (!force && gPhysicalFodDown.exchange(true)) {
         return;
     }
@@ -778,7 +796,8 @@ static void handleFodUp(const char* source) {
     gFodSessionTerminal.store(false);
 
     // Re-arm touch only if a biometric operation is still active
-    if (gFpOperation.load() != FP_OP_NONE) {
+    if (gFpOperation.load() != FP_OP_NONE &&
+        !(isJiiovFod() && gJiiovAuthCompleted.load())) {
         xiaomiConditionUpdate(4, 1);
         xiaomiConditionUpdate(1, 1);
         setTouchFeature(0, 10, 1);
@@ -1579,6 +1598,16 @@ static binder_status_t fpCompatOnTransact(
             gPhysicalFodDown.store(false);
             gPendingFodDown.store(false);
 
+            if (isJiiovFod() && gScreenState.load() == 1 &&
+                (gJiiovAuthCompleted.load() ||
+                 gFpOperation.load() == FP_OP_NONE)) {
+                xiaomiConditionUpdate(4, 0);
+                xiaomiConditionUpdate(1, 0);
+                setTouchFeature(0, 10, 0);
+                LOGI("Jiiov idle screen ON: touch monitor remains disarmed");
+                return writeOkReply(out);
+            }
+
             const bool state4 = xiaomiConditionUpdate(4, 1);
             const bool state1 = xiaomiConditionUpdate(1, 1);
             const bool armed = state4 && state1;
@@ -1608,8 +1637,22 @@ static binder_status_t fpCompatOnTransact(
                 AParcel_readInt32(in, &screenState);
             }
             LOGI("ColorOS SET_SCREEN_STATE screenState=%d", screenState);
+            gScreenState.store(screenState);
 
-            // Re-arm touch on ALL screen states (0 = OFF, 1 = ON, 2 = DOZE)
+            if (isJiiovFod() && screenState == 1 &&
+                (gJiiovAuthCompleted.load() ||
+                 gFpOperation.load() == FP_OP_NONE)) {
+                // The normal screen-on callback follows auth success. Do not
+                // re-enable Jiiov FOD touch beneath the unlocked launcher.
+                gPendingFodDown.store(false);
+                xiaomiConditionUpdate(4, 0);
+                xiaomiConditionUpdate(1, 0);
+                setTouchFeature(0, 10, 0);
+                LOGI("Jiiov idle screen ON: FOD touch kept off");
+                return writeOkReply(out);
+            }
+
+            // Arm for OFF/DOZE and for an active on-screen fingerprint operation.
             gFodSessionTerminal.store(false);
             gPhysicalFodDown.store(false);
             gPendingFodDown.store(false);
@@ -1631,6 +1674,8 @@ static binder_status_t fpCompatOnTransact(
                 AParcel_readInt32(in, &authType);
             }
             LOGI("ColorOS AUTHENTICATE_TYPE type=%d", authType);
+            if (isJiiovFod())
+                gJiiovAuthCompleted.store(false);
 
             gFodSessionTerminal.store(false);
             gPhysicalFodDown.store(false);
@@ -1675,6 +1720,9 @@ static void startFingerprintOperation(
 
     gFpOperation.store(
         operation);
+
+    if (isJiiovFod())
+        gJiiovAuthCompleted.store(false);
 
     if (operation == FP_OP_ENROLL)
         gLastEnrollRemaining.store(-1);
@@ -1777,13 +1825,14 @@ static binder_status_t sessionCompatOnTransact(
             gPhysicalFodDown.store(false);
         }
 
-        // DO NOT disable Xiaomi touch!
-        // Keep FOD touch armed in background for SOFOD wake!
-        xiaomiConditionUpdate(4, 1);
-        xiaomiConditionUpdate(1, 1);
-        setTouchFeature(0, 10, 1);
+        // Screen-off FOD remains armed for SOFOD. Jiiov must be disarmed
+        // while the unlocked screen is ON or idle touches light LHBM.
+        const bool armTouch = !isJiiovFod() || gScreenState.load() != 1;
+        xiaomiConditionUpdate(4, armTouch ? 1 : 0);
+        xiaomiConditionUpdate(1, armTouch ? 1 : 0);
+        setTouchFeature(0, 10, armTouch ? 1 : 0);
 
-        LOGI("SESSION CLOSE stillDown=%d - touch kept armed", stillDown);
+        LOGI("SESSION CLOSE stillDown=%d armTouch=%d", stillDown, armTouch);
     }
 
     return st;
@@ -2084,6 +2133,9 @@ rodinBpOnAuthSucceeded(
         // Guarantee isTouchDownNow is asserted in ColorOS SystemUI
         handleFodDown("auth_success_assert");
     }
+
+    if (isJiiovFod())
+        gJiiovAuthCompleted.store(true);
 
     ::ndk::ScopedAStatus status = real(self, enrollmentId, hat);
 
