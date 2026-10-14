@@ -140,7 +140,7 @@ enum : int32_t {
 
 static std::atomic<int32_t> gFpOperation{FP_OP_NONE};
 static std::atomic<int32_t> gScreenState{1};
-static std::atomic<bool> gJiiovAuthCompleted{false};
+static std::atomic<bool> gFodAuthCompleted{false};
 
 static bool isJiiovFod() {
     static const bool detected = [] {
@@ -149,6 +149,41 @@ static bool isJiiovFod() {
         return strncasecmp(vendor, "jiiov", 5) == 0;
     }();
     return detected;
+}
+
+// EVONIX_TEST3_FOD: FocalTech is the TOUCH controller, not the Goodix/Jiiov FOD sensor.
+// A property explicitly set to 0 or 1 overrides auto detection. Default is auto.
+// Do not cache a negative result: touch sysfs can appear after the daemon starts.
+static bool isFocalTechTouch() {
+    char overrideValue[PROP_VALUE_MAX] = {};
+    __system_property_get("persist.vendor.evonix.focaltech_guard", overrideValue);
+    if (strcmp(overrideValue, "1") == 0) return true;
+    if (strcmp(overrideValue, "0") == 0) return false;
+
+    static constexpr const char* nodes[] = {
+        "/sys/devices/platform/focaltech_ts.0/fod_enable",
+        "/sys/bus/platform/devices/focaltech_ts.0/fod_enable",
+    };
+    for (const auto* node : nodes) {
+        if (access(node, F_OK) == 0) return true;
+    }
+    return false;
+}
+
+static bool needsIdleFodDisarm() {
+    return isJiiovFod() || isFocalTechTouch();
+}
+
+// Applies only after unlock, or between authenticating sessions on SCREEN ON.
+static bool shouldDisarmIdleFod() {
+    return needsIdleFodDisarm() && gScreenState.load() == 1 &&
+           (gFodAuthCompleted.load() || gFpOperation.load() == FP_OP_NONE);
+}
+
+// Preserve pending physical DOWN events before authentication starts.
+static bool shouldIgnoreIdleDown() {
+    return needsIdleFodDisarm() && gScreenState.load() == 1 &&
+           gFodAuthCompleted.load();
 }
 
 static std::atomic<int32_t> gLastEnrollRemaining{-1};
@@ -510,6 +545,8 @@ static bool setTouchFeature(
 static bool setFodNode(bool enabled) {
     static constexpr const char* nodes[] = {
         "/sys/devices/platform/goodix_ts.0/fod_enable",
+        // EVONIX_TEST3_FOD: fallback for FocalTech when TouchFeature HAL is unavailable.
+        "/sys/devices/platform/focaltech_ts.0/fod_enable",
         "/sys/devices/virtual/touch/touch_dev/fod_enable",
         "/sys/class/touch/touch_dev/fod_enable",
     };
@@ -759,8 +796,7 @@ static std::chrono::steady_clock::time_point gAuthSucceededTime{};
 
 static void handleFodDown(const char* source, bool force = false) {
     // Jiiov must not forward idle scanner touches to ColorOS after unlock.
-    if (isJiiovFod() && gScreenState.load() == 1 &&
-        gJiiovAuthCompleted.load()) {
+    if (shouldIgnoreIdleDown()) {
         return;
     }
 
@@ -797,7 +833,7 @@ static void handleFodUp(const char* source) {
 
     // Re-arm touch only if a biometric operation is still active
     if (gFpOperation.load() != FP_OP_NONE &&
-        !(isJiiovFod() && gJiiovAuthCompleted.load())) {
+        !shouldDisarmIdleFod()) {
         xiaomiConditionUpdate(4, 1);
         xiaomiConditionUpdate(1, 1);
         setTouchFeature(0, 10, 1);
@@ -1087,6 +1123,8 @@ static constexpr int32_t OPLUS_FEATURE_HBM_CONTROL = 22;
  * No panel operation is performed here.
  */
 static constexpr int32_t OPLUS_FEATURE_AOD_SMOOTH = 217;
+// EVONIX_TEST4_COLOR_MODE: older ColorOS uses feature 179 to avoid forced normal gamut.
+static constexpr int32_t OPLUS_FEATURE_COLOR_CALIBRATION = 179;
 static constexpr int32_t OPLUS_AOD_SMOOTH_CAPS    = 0xF;
 
 static std::once_flag gOplusPanelRegisterOnce;
@@ -1256,6 +1294,36 @@ static binder_status_t oplusPanelOnTransact(
          *   bit2 = panoramic support
          *   bit3 = panoramic all-day support
          */
+        // EVONIX_TEST4_COLOR_MODE: experimental compatibility reply.
+        // Older OPlus OnScreenHighLightControl.isDisplayColorModeCalibrateSupport()
+        // expects [1] for feature 179; this suppresses a temporary forced color mode 0.
+        // It does NOT perform real panel calibration or affect Xiaomi's LHBM path.
+        if (feature == OPLUS_FEATURE_COLOR_CALIBRATION) {
+            // EVONIX_TEST5_ARRAYLEN: Java readIntArray requires the reply array
+            // to match the length requested by the caller. TEST4 returned
+            // a fixed one-element array; ColorOS 17 logged "bad array lengths".
+            const bool validLength = requestedLength > 0 && requestedLength <= 32;
+            const size_t responseLength = validLength
+                ? static_cast<size_t>(requestedLength) : 0;
+            std::vector<int32_t> values(responseLength, 0);
+            if (!values.empty()) {
+                values[0] = 1; // Feature 179: color calibration supported.
+            }
+
+            st = panelWriteOk(out);
+            if (st != STATUS_OK) return st;
+            st = AParcel_writeInt32(out, validLength ? 0 : -1);
+            if (st != STATUS_OK) return st;
+            st = AParcel_writeInt32Array(
+                out,
+                values.empty() ? nullptr : values.data(),
+                values.size());
+            LOGI("EVONIX_TEST5_ARRAYLEN: OplusPanel GET feature=179 "
+                 "requestLen=%d replyLen=%zu firstValue=%d status=%d",
+                 requestedLength, values.size(), values.empty() ? -1 : values[0], st);
+            return st;
+        }
+
         if (feature == OPLUS_FEATURE_AOD_SMOOTH) {
             const int32_t value =
                 OPLUS_AOD_SMOOTH_CAPS;
@@ -1598,9 +1666,7 @@ static binder_status_t fpCompatOnTransact(
             gPhysicalFodDown.store(false);
             gPendingFodDown.store(false);
 
-            if (isJiiovFod() && gScreenState.load() == 1 &&
-                (gJiiovAuthCompleted.load() ||
-                 gFpOperation.load() == FP_OP_NONE)) {
+            if (shouldDisarmIdleFod()) {
                 xiaomiConditionUpdate(4, 0);
                 xiaomiConditionUpdate(1, 0);
                 setTouchFeature(0, 10, 0);
@@ -1639,9 +1705,7 @@ static binder_status_t fpCompatOnTransact(
             LOGI("ColorOS SET_SCREEN_STATE screenState=%d", screenState);
             gScreenState.store(screenState);
 
-            if (isJiiovFod() && screenState == 1 &&
-                (gJiiovAuthCompleted.load() ||
-                 gFpOperation.load() == FP_OP_NONE)) {
+            if (shouldDisarmIdleFod()) {
                 // The normal screen-on callback follows auth success. Do not
                 // re-enable Jiiov FOD touch beneath the unlocked launcher.
                 gPendingFodDown.store(false);
@@ -1674,8 +1738,7 @@ static binder_status_t fpCompatOnTransact(
                 AParcel_readInt32(in, &authType);
             }
             LOGI("ColorOS AUTHENTICATE_TYPE type=%d", authType);
-            if (isJiiovFod())
-                gJiiovAuthCompleted.store(false);
+            gFodAuthCompleted.store(false);
 
             gFodSessionTerminal.store(false);
             gPhysicalFodDown.store(false);
@@ -1721,8 +1784,7 @@ static void startFingerprintOperation(
     gFpOperation.store(
         operation);
 
-    if (isJiiovFod())
-        gJiiovAuthCompleted.store(false);
+    gFodAuthCompleted.store(false);
 
     if (operation == FP_OP_ENROLL)
         gLastEnrollRemaining.store(-1);
@@ -1827,7 +1889,8 @@ static binder_status_t sessionCompatOnTransact(
 
         // Screen-off FOD remains armed for SOFOD. Jiiov must be disarmed
         // while the unlocked screen is ON or idle touches light LHBM.
-        const bool armTouch = !isJiiovFod() || gScreenState.load() != 1;
+        // EVONIX_TEST3_FOD: do not leave FocalTech/Jiiov idle touch armed on HOME.
+        const bool armTouch = !shouldDisarmIdleFod();
         xiaomiConditionUpdate(4, armTouch ? 1 : 0);
         xiaomiConditionUpdate(1, armTouch ? 1 : 0);
         setTouchFeature(0, 10, armTouch ? 1 : 0);
@@ -2134,8 +2197,7 @@ rodinBpOnAuthSucceeded(
         handleFodDown("auth_success_assert");
     }
 
-    if (isJiiovFod())
-        gJiiovAuthCompleted.store(true);
+    gFodAuthCompleted.store(true);
 
     ::ndk::ScopedAStatus status = real(self, enrollmentId, hat);
 
