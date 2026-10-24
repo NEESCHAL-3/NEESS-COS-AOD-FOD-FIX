@@ -165,6 +165,12 @@ fn settings_put_async(name: &'static str, value: &'static str) {
 
 
 fn write_backlight(value: u32) {
+    // EVONIX_TEST3_AOD: never blank an interactive display due to late AOD/FOD log messages.
+    // Guard ONLY writes of zero: the original DOZE/FOD brightness policies remain untouched.
+    if value == 0 && display_really_awake() {
+        klog("EVONIX_TEST3_AOD: BL=0 suppressed while PowerManager reports Awake");
+        return;
+    }
     if let Ok(mut f) = OpenOptions::new().write(true).open(BL) {
         let _ = write!(f, "{value}");
     }
@@ -179,6 +185,11 @@ fn read_backlight() -> Option<u32> {
 }
 
 fn ensure_aod_backlight() {
+    // EVONIX_TEST3_AOD: asynchronous DOZE keepalive must never repaint an Awake screen.
+    if display_really_awake() {
+        klog("EVONIX_TEST3_AOD: delayed DOZE keepalive skipped while Awake");
+        return;
+    }
     if read_backlight() == Some(0) {
         write_backlight(AOD_BL);
         thread::sleep(Duration::from_millis(20));
@@ -216,6 +227,61 @@ fn is_all_day_aod() -> bool {
     let energy = settings_get("Setting_AodUserEnergySavingSet").unwrap_or_default();
     let imm = settings_get("Setting_AodEnableImmediate").unwrap_or_default();
     energy == "0" && imm == "1"
+}
+
+
+// EVONIX_TEST6_SCHEDULED_AOD: Read active ColorOS scheduled-AOD window.
+// This is evaluated only on a power-saving hide event, not continuously.
+fn aod_schedule_minute(hour_key: &str, minute_key: &str) -> Option<u32> {
+    let hour = settings_get(hour_key)?.parse::<u32>().ok()?;
+    let minute = settings_get(minute_key)?.parse::<u32>().ok()?;
+    if hour > 23 || minute > 59 {
+        return None;
+    }
+    Some(hour * 60 + minute)
+}
+
+fn aod_scheduled_now() -> bool {
+    if !is_aod_master_enabled()
+        || settings_get("Setting_AodUserSetTime").as_deref() != Some("1")
+        || settings_get("Setting_AodEnableImmediate").as_deref() != Some("0")
+        || settings_get("Setting_AodUserEnergySavingSet").as_deref() != Some("0")
+    {
+        return false;
+    }
+    let Some(start) = aod_schedule_minute(
+        "Setting_AodSetTimeBeginHour", "Setting_AodSetTimeBeginMin") else {
+        return false;
+    };
+    let Some(end) = aod_schedule_minute(
+        "Setting_AodSetTimeEndHour", "Setting_AodSetTimeEndMin") else {
+        return false;
+    };
+    // Do not reinterpret an equal start/end as a full-day schedule.
+    if start == end {
+        return false;
+    }
+    let output = match Command::new("/system/bin/date").arg("+%H:%M").output() {
+        Ok(v) if v.status.success() => v,
+        _ => return false,
+    };
+    let local_time = String::from_utf8_lossy(&output.stdout);
+    let Some((hour, minute)) = local_time.trim().split_once(':') else {
+        return false;
+    };
+    let (Ok(hour), Ok(minute)) = (hour.parse::<u32>(), minute.parse::<u32>()) else {
+        return false;
+    };
+    if hour > 23 || minute > 59 {
+        return false;
+    }
+    let now = hour * 60 + minute;
+    if start < end {
+        start <= now && now < end
+    } else {
+        // Supports overnight intervals such as 23:00 -> 01:00.
+        now >= start || now < end
+    }
 }
 
 fn main() {
@@ -310,10 +376,14 @@ fn main() {
             }
 
             // 3. POWER-SAVING (10s/smart) TIMEOUT HIDE
-            if line.contains("onEnergySavingNotifyHide")
+            if line.contains("WorkshopAodController-->onEnergySavingNotifyHide")
+                // EVONIX_TEST6_SCHEDULED_AOD: a status message saying the
+                // energy-saving mode is CLOSED must never be treated as an
+                // instruction to disable the AOD switch.
+                && !line.contains("energySaving mode is closed")
                 && !fp_only_phase
             {
-                if !is_all_day_aod() {
+                if !is_all_day_aod() && !aod_scheduled_now() {
                     pending_energy_hide = true;
                     // CRITICAL: Immediately disable AOD switch in background!
                     // This ensures ColorOS enters Screen-Off Fingerprint (SOFOD) mode
@@ -323,7 +393,7 @@ fn main() {
                     fp_panel_allowed = true;
                     klog("power-saving AOD hide -> armed SOFOD (Setting_AodSwitchEnable=0)");
                 } else {
-                    klog("ignoring energy-saving hide (all-day AOD active)");
+                    klog("EVONIX_TEST6_SCHEDULED_AOD: ignore hide (all-day or scheduled window active)");
                 }
             }
 
