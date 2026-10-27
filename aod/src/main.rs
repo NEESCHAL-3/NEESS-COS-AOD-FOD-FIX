@@ -1,3 +1,6 @@
+mod power_state;
+use power_state::{parse_power_state, PowerState};
+
 use std::{
     fs::{self, File, OpenOptions},
     io::{BufRead, BufReader, Read, Write},
@@ -165,14 +168,19 @@ fn settings_put_async(name: &'static str, value: &'static str) {
 
 
 fn write_backlight(value: u32) {
-    // EVONIX_TEST3_AOD: never blank an interactive display due to late AOD/FOD log messages.
-    // Guard ONLY writes of zero: the original DOZE/FOD brightness policies remain untouched.
-    if value == 0 && display_really_awake() {
-        klog("EVONIX_TEST3_AOD: BL=0 suppressed while PowerManager reports Awake");
+    if read_backlight() == Some(value) {
+        return;
+    }
+    // Logcat may deliver an old icon-hide event after fingerprint unlock.
+    // Unknown or interactive power states never grant AOD panel ownership.
+    if !read_power_state().permits_panel_override() {
+        klog("Panel override skipped: display is interactive or state is unavailable");
         return;
     }
     if let Ok(mut f) = OpenOptions::new().write(true).open(BL) {
-        let _ = write!(f, "{value}");
+        if let Err(error) = write!(f, "{value}") {
+            klog(&format!("Panel override failed: {error}"));
+        }
     }
 }
 
@@ -198,20 +206,19 @@ fn ensure_aod_backlight() {
     }
 }
 
-fn display_really_awake() -> bool {
-    let output = match Command::new("/system/bin/dumpsys")
-        .arg("power")
+fn read_power_state() -> PowerState {
+    let output = match Command::new("/system/bin/timeout")
+        .args(["2", "/system/bin/dumpsys", "-t", "1", "power"])
         .output()
     {
-        Ok(v) => v,
-        Err(_) => return false,
+        Ok(output) if output.status.success() => output,
+        _ => return PowerState::Unknown,
     };
+    parse_power_state(&String::from_utf8_lossy(&output.stdout))
+}
 
-    let text = String::from_utf8_lossy(&output.stdout);
-
-    text.contains("mWakefulness=Awake")
-        || text.contains("mInteractive=true")
-        || text.contains("Wakefulness: Awake")
+fn display_really_awake() -> bool {
+    !read_power_state().permits_panel_override()
 }
 
 fn is_aod_master_enabled() -> bool {
@@ -353,6 +360,13 @@ fn main() {
                 Err(_) => continue,
             };
 
+            if (line.contains("setScreenState changed:") && line.contains("->ON"))
+                || line.contains("Waking up from")
+            {
+                fp_panel_allowed = false;
+                pending_energy_hide = false;
+            }
+
             // 1. DOZE ENTRY (Normal AOD clock start)
             if line.contains("setScreenState changed:")
                 && line.contains("->DOZE")
@@ -408,40 +422,36 @@ fn main() {
                 klog("entered FP-only phase (screen OFF, panel 0)");
             }
 
-            // 5. ULTRA-FAST SOFOD PATH (Screen-Off Fingerprint Hint)
-            if fp_only_phase {
-                // Immediate trigger on motion pickup, tilt, or sensor callback
-                if line.contains("notifyWakeUpCallback")
-                    || line.contains("RodinSensorCompat: instant pickup trigger")
-                    || line.contains("RodinSensorCompat: pickup -> synthetic 65611")
-                {
+            // The user can change AOD mode without restarting this daemon.
+            // Refresh the screen-off ownership only on real wake/display events.
+            let hint_wake = line.contains("notifyWakeUpCallback")
+                || line.contains("RodinSensorCompat: instant pickup trigger")
+                || line.contains("RodinSensorCompat: pickup -> synthetic 65611");
+            let screen_off_transition = line.contains("setScreenState changed:")
+                && (line.contains("->DOZE") || line.contains("->OFF"));
+            if screen_off_transition {
+                let master = is_aod_master_enabled();
+                let content = settings_get("Setting_AodSwitchEnable")
+                    .map(|value| value == "1").unwrap_or(master);
+                fp_only_phase = power_state::hint_only_mode(master, content);
+                fp_panel_allowed = true;
+            }
+
+            // No settings subprocesses on the pickup callback. The mode was
+            // synchronized at screen-off, and write_backlight performs the
+            // single fresh power-state check before changing the panel.
+            if hint_wake {
+                fp_panel_allowed = true;
+                write_backlight(FP_BL);
+                klog("Native screen-off wake -> hint brightness requested");
+            }
+
+            if line.contains("OnScreenFingerprintIcon") {
+                if line.contains("setVisibility VISIBLE") {
                     fp_panel_allowed = true;
                     write_backlight(FP_BL);
-                    klog("SOFOD wake -> panel 100");
-                }
-
-                // Immediate re-assertion when display controller enters DOZE
-                if line.contains("setScreenState changed:OFF->DOZE") && fp_panel_allowed {
-                    write_backlight(FP_BL);
-                    klog("SOFOD DOZE -> panel 100");
-                }
-
-                // Immediate re-assertion when fingerprint icon is drawn
-                if line.contains("OnScreenFingerprintIcon")
-                    && line.contains("setVisibility VISIBLE")
-                    && fp_panel_allowed
-                {
-                    write_backlight(FP_BL);
-                    klog("SOFOD icon VISIBLE -> panel 100");
-                }
-
-                // Immediate screen turn-off when icon times out
-                if line.contains("OnScreenFingerprintIcon")
-                    && line.contains("setVisibility INVISIBLE")
-                    && fp_panel_allowed
-                {
-                    write_backlight(0);
-                    klog("SOFOD icon INVISIBLE -> panel 0");
+                } else if line.contains("setVisibility INVISIBLE") && fp_panel_allowed {
+                    write_backlight(if fp_only_phase { 0 } else { AOD_BL });
                 }
             }
 

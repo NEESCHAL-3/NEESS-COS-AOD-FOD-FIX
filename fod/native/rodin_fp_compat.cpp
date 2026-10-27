@@ -73,6 +73,7 @@ private:
 #include <vector>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include "fod_input_policy.h"
 
 #define LOG_TAG "RodinFpCompat"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -771,7 +772,7 @@ static int findFodInput() {
             i);
 
         int fd =
-            open(path, O_RDONLY | O_CLOEXEC);
+            open(path, O_RDONLY | O_CLOEXEC | O_NONBLOCK);
 
         if (fd < 0)
             continue;
@@ -902,10 +903,9 @@ static void inputWorker() {
         }
 
         while (true) {
-            // When touch listener is active, poll fast (15ms) to catch any
-            // touch down/up transitions on drivers like FocalTech that don't
-            // emit FOD_KEY or sysfs_notify. When idle, poll at 500ms to save CPU.
-            const int timeoutMs = 25;
+            const bool active = gFpOperation.load() != FP_OP_NONE
+                || gTouchListener.load() || gPhysicalFodDown.load();
+            const int timeoutMs = rodin::fodPollTimeout(active, fd_sysfs >= 0);
             int ret = poll(fds, nfds, timeoutMs);
             if (ret < 0) {
                 if (errno == EINTR) continue;
@@ -913,32 +913,30 @@ static void inputWorker() {
                 break;
             }
 
-            // Always sample sysfs fod_press_status if available
-            if (fd_sysfs >= 0) {
-                char buf[32] = {};
-                lseek(fd_sysfs, 0, SEEK_SET);
-                int n = read(fd_sysfs, buf, sizeof(buf) - 1);
-                if (n > 0) {
-                    buf[n] = '\0';
-                    const bool pressed = parseFodStatus(buf, n) > 0;
-                    if (pressed && !gPhysicalFodDown.load()) {
-                        handleFodDown("sysfs");
-                    } else if (!pressed && gPhysicalFodDown.load()) {
-                        handleFodUp("sysfs");
+            // Consume queued hardware edges first. A nonblocking, bounded drain
+            // leaves the fallback serviceable even while the input device is busy.
+            bool hardwareEdge = false;
+            if (idx_input >= 0 && (fds[idx_input].revents & POLLIN)) {
+                rodin::drainFodInput(fd_input, [&](const input_event& ev) {
+                    if (ev.type != EV_KEY || ev.code != FOD_KEY) return;
+                    if (ev.value == 1 || ev.value == 0) {
+                        hardwareEdge = true;
+                        if (ev.value == 1) handleFodDown("evdev");
+                        else handleFodUp("evdev");
                     }
-                }
+                });
             }
 
-            // Process evdev FOD_KEY
-            if (idx_input >= 0 && (fds[idx_input].revents & POLLIN)) {
-                input_event ev{};
-                while (read(fd_input, &ev, sizeof(ev)) == sizeof(ev)) {
-                    if (ev.type != EV_KEY || ev.code != FOD_KEY) continue;
-                    if (ev.value == 1) {
-                        handleFodDown("evdev");
-                    } else if (ev.value == 0) {
-                        handleFodUp("evdev");
-                    }
+            // Some touch drivers expose no usable edge notification. Poll their
+            // existing status node during an active session, without synthesizing
+            // authentication or contradicting a hardware edge from this batch.
+            if (rodin::sampleFodStatus(fd_sysfs >= 0, hardwareEdge)) {
+                char buf[32] = {};
+                int n = pread(fd_sysfs, buf, sizeof(buf) - 1, 0);
+                if (n > 0) {
+                    const bool pressed = parseFodStatus(buf, n) > 0;
+                    if (pressed && !gPhysicalFodDown.load()) handleFodDown("sysfs");
+                    else if (!pressed && gPhysicalFodDown.load()) handleFodUp("sysfs");
                 }
             }
 

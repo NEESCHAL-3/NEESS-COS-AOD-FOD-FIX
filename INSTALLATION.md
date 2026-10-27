@@ -6,7 +6,7 @@ When installing manually or integrating into an unpacked ROM, every file must ha
 
 | File Path in ROM | Permissions | Owner | SELinux Context | Description |
 |---|---|---|---|---|
-| `/system/bin/nees_aodd` | `0755` (`rwxr-xr-x`) | `root:root` | `u:object_r:system_file:s0` | Native AOD backlight & SOFOD daemon executable |
+| `/system/bin/nees_aodd` | `0755` (`rwxr-xr-x`) | `root:root` | `u:object_r:shell_exec:s0` | Native AOD backlight & SOFOD daemon executable |
 | `/system/etc/init/nees_aodd.rc` | `0644` (`rw-r--r--`) | `root:root` | `u:object_r:system_file:s0` | Daemon init service definition (`seclabel u:r:shell:s0`) |
 | `/vendor/lib64/librodin_fp_compat.so` | `0644` (`rw-r--r--`) | `root:root` | `u:object_r:vendor_file:s0` | Fingerprint & panel feature 217 compat shim |
 | `/vendor/etc/init/zz_rodin_fp_compat.rc` | `0644` (`rw-r--r--`) | `root:root` | `u:object_r:vendor_configs_file:s0` | Hardware hook & Goodix/FocalTech permissions |
@@ -20,7 +20,7 @@ If you are packing partition images using `mkfs.erofs` or `e2fsdroid`, add these
 
 ### 1. `plat_file_contexts` (System Partition)
 ```text
-/system/bin/nees_aodd                   u:object_r:system_file:s0
+/system/bin/nees_aodd                   u:object_r:shell_exec:s0
 /system/etc/init/nees_aodd\.rc          u:object_r:system_file:s0
 ```
 

@@ -49,6 +49,13 @@ else
   exit 1
 fi
 
+# Validate required context source before changing any ROM files.
+FC="$SYS_DIR/etc/selinux/plat_file_contexts"
+if [ ! -f "$FC" ]; then
+  echo "Error: Missing plat_file_contexts; provide the ROM context source before installing" >&2
+  exit 1
+fi
+
 echo "================================================================"
 echo " POCO X7 Pro (Rodin) - Baking FOD & AOD Fixes into ROM"
 echo "================================================================"
@@ -60,7 +67,15 @@ echo ""
 echo "-> [1/7] Installing nees_aodd to $SYS_DIR/bin/"
 cp -f "$SCRIPT_DIR/system/bin/nees_aodd" "$SYS_DIR/bin/nees_aodd"
 chmod 755 "$SYS_DIR/bin/nees_aodd"
-chcon u:object_r:system_file:s0 "$SYS_DIR/bin/nees_aodd" 2>/dev/null || true
+FC="$SYS_DIR/etc/selinux/plat_file_contexts"
+if [ -f "$FC" ]; then
+  sed -i '/^\/system\/bin\/nees_aodd[[:space:]]/d' "$FC"
+  printf '\n/system/bin/nees_aodd -- u:object_r:shell_exec:s0\n' >> "$FC"
+else
+  echo "Error: Missing plat_file_contexts; add the exact shell_exec daemon mapping during image packing" >&2
+  exit 1
+fi
+chcon u:object_r:shell_exec:s0 "$SYS_DIR/bin/nees_aodd" 2>/dev/null || true
 
 # 2. Install AOD Init Service
 echo "-> [2/7] Installing nees_aodd.rc to $SYS_DIR/etc/init/"
@@ -75,12 +90,19 @@ cp -f "$SCRIPT_DIR/vendor/lib64/librodin_fp_compat.so" "$VEN_DIR/lib64/librodin_
 chmod 644 "$VEN_DIR/lib64/librodin_fp_compat.so"
 chcon u:object_r:vendor_file:s0 "$VEN_DIR/lib64/librodin_fp_compat.so" 2>/dev/null || true
 
-if [ -f "$SCRIPT_DIR/vendor/lib64/hw/sensors.mt6899.so" ]; then
+# Updating FOD/AOD must not silently replace an independently fixed sensor HAL.
+if [ "${NEES_INSTALL_SENSOR_HAL:-0}" = 1 ] || [ ! -f "$VEN_DIR/lib64/hw/sensors.mt6899.so" ]; then
+  if [ ! -f "$SCRIPT_DIR/vendor/lib64/hw/sensors.mt6899.so" ]; then
+    echo "Error: Requested sensor HAL payload is missing" >&2
+    exit 1
+  fi
   echo "-> Installing sensors.mt6899.so (Instant Tilt & Pickup HAL) to $VEN_DIR/lib64/hw/"
   mkdir -p "$VEN_DIR/lib64/hw"
   cp -f "$SCRIPT_DIR/vendor/lib64/hw/sensors.mt6899.so" "$VEN_DIR/lib64/hw/sensors.mt6899.so"
   chmod 644 "$VEN_DIR/lib64/hw/sensors.mt6899.so"
   chcon u:object_r:vendor_file:s0 "$VEN_DIR/lib64/hw/sensors.mt6899.so" 2>/dev/null || true
+else
+  echo "-> Preserving the ROM's existing sensors.mt6899.so (set NEES_INSTALL_SENSOR_HAL=1 to replace explicitly)"
 fi
 
 # Install the framework Doze RRO used by ColorOS AOD.

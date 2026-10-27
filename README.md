@@ -15,6 +15,29 @@ Achieves full OEM-grade FOD unlock, instant optical highlight turn-off, zero loc
 
 ---
 
+## Recent FOD/AOD changes
+
+- Hardware FOD events are drained without blocking the sysfs fallback. Drivers
+  without reliable notifications use an 8 ms fallback during active biometric
+  sessions and a slower idle check. Authentication and the vendor's LHBM-ready
+  synchronization remain unchanged.
+- The AOD daemon accepts ColorOS named and numeric wakefulness states, avoids
+  panel overrides while interactive, and refreshes hint mode on native wake
+  events after AOD settings change.
+- `/system/bin/nees_aodd` has an explicit `shell_exec` file-context entry for
+  its existing `shell` service domain. Keep SELinux Enforcing.
+- Double-tap to wake follows the ColorOS Settings toggle through Xiaomi's
+  touch HAL. See [the DT2W framework guide](framework/DT2W.md); Settings.apk
+  remains unchanged.
+- Call proximity is a separate `oplus-services.jar` fix. Use the
+  [proximity source patcher and guide](framework/PROXIMITY.md); do not replace
+  the sensor HAL to apply it.
+
+See [updating an existing ROM](docs/FOD-AOD-UPDATE.md) for builds, permanent
+installation, rollback and the test matrix. Other touchscreen/fingerprint
+pairings require their own hardware verification; the shared path does not
+establish equal speed on every sensor.
+
 ## Working fixes
 
 | Feature | Result |

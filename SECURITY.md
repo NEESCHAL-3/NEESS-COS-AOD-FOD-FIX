@@ -27,7 +27,11 @@ The signature binds:
 - AOD daemon
 - FOD compatibility library
 
-`sys.nees4.authorized=1` is only a volatile runtime handoff after crypto verification.
+The current shared-mode runtime continues after a signature-mismatch notice;
+`--verify-only` is the strict signed-manifest check. The volatile
+`sys.nees4.authorized` handoff is therefore not proof of crypto verification
+in this mode. Vendor biometric authentication and lockout remain separate.
+See [the update guide](docs/FOD-AOD-UPDATE.md#signature-notices).
 
 ## Before every push
 

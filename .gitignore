@@ -75,3 +75,7 @@ nav-ui*.xml
 nees-google-ai*
 release/
 Nees*.rc
+
+# Python patcher bytecode
+__pycache__/
+*.pyc
