@@ -24,6 +24,9 @@ def main():
     backend_patched = "RodinTouchBridge;->writeNodeFile" in body
     if not args.helper_smali.is_file():raise SystemExit("Missing compiled helper; no files changed")
     if 'Lcom/android/server/wm/RodinTouchBridge;' not in args.helper_smali.read_text():raise SystemExit("Wrong helper class")
+    companion = args.helper_smali.parent / 'RodinAodTapBridge.smali'
+    if 'RodinAodTapBridge;->initialize' in args.helper_smali.read_text() and not companion.is_file():
+        raise SystemExit('Missing compiled RodinAodTapBridge companion; no files changed')
     if not re.search(r"\.registers\s+11\b",body) or 'const/4 v2, -0x2' not in body:
         raise SystemExit("Unsupported ColorOS register layout; no files changed")
     native="    invoke-direct {p0}, Lcom/android/server/wm/ColorTouchNodeManagerService;->getOplusTouchService()Lvendor/oplus/hardware/touch/IOplusTouch;"
@@ -61,8 +64,9 @@ def main():
     backup=p.with_suffix(p.suffix+'.pre-rodin-dt2w')
     if not backup.exists():shutil.copy2(p,backup)
     temporary=p.with_suffix(p.suffix+'.rodin-new');temporary.write_text(updated);shutil.copystat(p,temporary);os.replace(temporary,p)
-    for helper in args.helper_smali.parent.glob("RodinTouchBridge*.smali"):
-        shutil.copy2(helper, p.parent / helper.name)
+    for pattern in ("RodinTouchBridge*.smali", "RodinAodTapBridge*.smali"):
+        for helper in args.helper_smali.parent.glob(pattern):
+            shutil.copy2(helper, p.parent / helper.name)
     if refresh_update is not None:
         backup = refresh.with_suffix(refresh.suffix + '.pre-rodin-dt2w')
         if not backup.exists(): shutil.copy2(refresh, backup)

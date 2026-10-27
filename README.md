@@ -17,6 +17,11 @@ Achieves full OEM-grade FOD unlock, instant optical highlight turn-off, zero loc
 
 ## Recent FOD/AOD changes
 
+- A real screen-off single tap restores the AOD clock and fingerprint hint when
+  AOD is enabled and its schedule permits it. With AOD disabled, it shows the
+  hint only; pickup does not force the clock on. See the
+  [single-tap integration guide](framework/TAP-AOD.md).
+
 - Hardware FOD events are drained without blocking the sysfs fallback. Drivers
   without reliable notifications use an 8 ms fallback during active biometric
   sessions and a slower idle check. Authentication and the vendor's LHBM-ready

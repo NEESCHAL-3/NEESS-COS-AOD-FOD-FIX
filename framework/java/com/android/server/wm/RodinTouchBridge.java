@@ -38,6 +38,7 @@ public final class RodinTouchBridge {
         }, filter, Context.RECEIVER_NOT_EXPORTED);
         handler.post(RodinTouchBridge::applySelectedMode);
         Log.i("RodinTouchBridge", "Watching the ColorOS double-tap preference");
+        RodinAodTapBridge.initialize(context);
     }
 
     private static boolean selected() {
@@ -70,7 +71,9 @@ public final class RodinTouchBridge {
         return sendMode("1".equals(info) && selected() ? 1 : 0);
     }
 
-    private static int sendMode(int enabled) {
+    private static int sendMode(int enabled) { return sendNativeMode(14, enabled); }
+
+    public static int sendNativeMode(int mode, int enabled) {
         Parcel request = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
@@ -82,12 +85,12 @@ public final class RodinTouchBridge {
             }
             request.writeInterfaceToken(DESCRIPTOR);
             request.writeInt(0); // Primary touch controller.
-            request.writeInt(14); // Xiaomi Touch_Doubletap_Mode.
+            request.writeInt(mode); // Xiaomi native touch mode.
             request.writeInt(enabled);
             if (!service.transact(9, request, reply, 0)) return -1;
             reply.readException();
             int result = reply.readInt();
-            Log.i("RodinTouchBridge", "Double-tap enabled=" + enabled + " HAL result=" + result);
+            Log.i("RodinTouchBridge", "Touch mode=" + mode + " enabled=" + enabled + " HAL result=" + result);
             return result;
         } catch (Exception error) {
             Log.e("RodinTouchBridge", "Double-tap HAL request failed", error);

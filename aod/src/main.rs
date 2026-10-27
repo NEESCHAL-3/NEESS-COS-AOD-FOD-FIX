@@ -193,11 +193,8 @@ fn read_backlight() -> Option<u32> {
 }
 
 fn ensure_aod_backlight() {
-    // EVONIX_TEST3_AOD: asynchronous DOZE keepalive must never repaint an Awake screen.
-    if display_really_awake() {
-        klog("EVONIX_TEST3_AOD: delayed DOZE keepalive skipped while Awake");
-        return;
-    }
+    // write_backlight performs the fresh power-state guard. Avoid a second
+    // dumpsys round trip before the same guarded write.
     if read_backlight() == Some(0) {
         write_backlight(AOD_BL);
         thread::sleep(Duration::from_millis(20));
@@ -330,6 +327,7 @@ fn main() {
     let mut pending_energy_hide = false;
     let mut fp_only_phase = !aod_enabled;
     let mut fp_panel_allowed = !aod_enabled;
+    let mut tap_clock_active = false;
 
     loop {
         let mut child = match Command::new("/system/bin/logcat")
@@ -365,6 +363,20 @@ fn main() {
             {
                 fp_panel_allowed = false;
                 pending_energy_hide = false;
+                tap_clock_active = false;
+            }
+
+            // The framework restores clock content only for a real hardware tap
+            // after checking the AOD preference, schedule and proximity. Carry
+            // that confirmed state through DOZE entry instead of rereading two
+            // settings processes while the native clock is being drawn.
+            if line.contains("RodinAodTapBridge")
+                && line.contains("AOD clock content restored for hardware tap")
+            {
+                tap_clock_active = true;
+                fp_only_phase = false;
+                pending_energy_hide = false;
+                fp_panel_allowed = true;
             }
 
             // 1. DOZE ENTRY (Normal AOD clock start)
@@ -398,6 +410,7 @@ fn main() {
                 && !fp_only_phase
             {
                 if !is_all_day_aod() && !aod_scheduled_now() {
+                    tap_clock_active = false;
                     pending_energy_hide = true;
                     // CRITICAL: Immediately disable AOD switch in background!
                     // This ensures ColorOS enters Screen-Off Fingerprint (SOFOD) mode
@@ -430,10 +443,13 @@ fn main() {
             let screen_off_transition = line.contains("setScreenState changed:")
                 && (line.contains("->DOZE") || line.contains("->OFF"));
             if screen_off_transition {
-                let master = is_aod_master_enabled();
-                let content = settings_get("Setting_AodSwitchEnable")
-                    .map(|value| value == "1").unwrap_or(master);
-                fp_only_phase = power_state::hint_only_mode(master, content);
+                if !(tap_clock_active && line.contains("->DOZE")) {
+                    tap_clock_active = false;
+                    let master = is_aod_master_enabled();
+                    let content = settings_get("Setting_AodSwitchEnable")
+                        .map(|value| value == "1").unwrap_or(master);
+                    fp_only_phase = power_state::hint_only_mode(master, content);
+                }
                 fp_panel_allowed = true;
             }
 

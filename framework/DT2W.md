@@ -21,12 +21,12 @@ change Settings.apk, or require a root manager at runtime.
 ## Rebuild the ROM's current services JAR
 
 Start from the ROM's current `oplus-services.jar`, preserving its proximity,
-display and other fixes. Compile `framework/java/com/android/server/wm/RodinTouchBridge.java`
+display and other fixes. Compile both Java helpers in `framework/java/com/android/server/wm/`
 against the target Android SDK, convert it using d8, and disassemble its DEX:
 
 ```bash
 mkdir -p out/touch-classes out/touch-dex
-javac -source 17 -target 17 -cp "$ANDROID_JAR" -d out/touch-classes framework/java/com/android/server/wm/RodinTouchBridge.java
+javac -source 17 -target 17 -cp "$ANDROID_JAR" -d out/touch-classes framework/java/com/android/server/wm/*.java
 d8 --min-api 34 --lib "$ANDROID_JAR" --output out/touch-dex out/touch-classes/com/android/server/wm/*.class
 baksmali disassemble --api 35 out/touch-dex/classes.dex -o out/touch-smali
 python3 framework/tools/patch_rodin_dt2w.py /path/to/services-smali out/touch-smali/com/android/server/wm/RodinTouchBridge.smali --dry-run
@@ -56,3 +56,8 @@ for HAL result 0 and relevant AVCs under Enforcing. On Goodix, read
 the bridge itself uses the HAL rather than that device-specific path.
 Keep native touch-controller and proximity safeguards. A direct HAL test
 alone does not establish that Settings is connected correctly.
+
+The touch helper includes the companion `RodinAodTapBridge` class. Compile and
+copy both helper families together. Single-tap detection remains inactive unless
+the complete input route and its version marker are installed using the
+[single-tap guide](TAP-AOD.md); DT2W alone does not install that route.
