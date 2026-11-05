@@ -9,6 +9,22 @@ mkdir -p "$WORK"
 [ -f "$KEY" ] || { echo "Missing private key: $KEY"; exit 2; }
 [ -f "$AOD" ] || { echo "Missing AOD binary: $AOD"; exit 3; }
 [ -f "$FOD" ] || { echo "Missing FOD binary: $FOD"; exit 4; }
+# A signature verified against the signer's own public key is insufficient:
+# the ROM verifier must trust that key too. Never emit a knowingly mismatched token.
+export NEES_KEY_CHECK_PATH="$KEY"
+export NEES_VERIFIER_SOURCE="${AOD_VERIFIER_SOURCE:-$ROOT/aod/src/main.rs}"
+python3 - <<'KEYCHECK'
+from pathlib import Path
+import os,re,subprocess
+source=Path(os.environ['NEES_VERIFIER_SOURCE']).read_text()
+match=re.search(r'const PUBLIC_KEY:\s*\[u8;\s*32\]\s*=\s*\[(.*?)\];',source,re.S)
+if not match: raise SystemExit('Cannot locate verifier public key; select AOD_VERIFIER_SOURCE')
+expected=bytes(int(x,16) for x in re.findall(r'0x([0-9a-fA-F]{2})',match.group(1)))
+der=subprocess.check_output(['openssl','pkey','-in',os.environ['NEES_KEY_CHECK_PATH'],'-pubout','-outform','DER'])
+if len(expected)!=32 or len(der)!=44 or der[:12]!=bytes.fromhex('302a300506032b6570032100') or der[-32:]!=expected:
+    raise SystemExit('Signing key does not match the verifier public key. Select the matching key, or update the public key and rebuild the daemon before signing.')
+print('Signing key matches verifier source; verify the installed binary with --verify-only')
+KEYCHECK
 if [ -n "${SYSTEM_BUILD_PROP:-}" ]; then
   cp "$SYSTEM_BUILD_PROP" "$WORK/system.build.prop.live"
 else

@@ -74,6 +74,7 @@ private:
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include "fod_input_policy.h"
+#include "fod_completion_policy.h"
 
 #define LOG_TAG "RodinFpCompat"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -177,14 +178,15 @@ static bool needsIdleFodDisarm() {
 
 // Applies only after unlock, or between authenticating sessions on SCREEN ON.
 static bool shouldDisarmIdleFod() {
-    return needsIdleFodDisarm() && gScreenState.load() == 1 &&
-           (gFodAuthCompleted.load() || gFpOperation.load() == FP_OP_NONE);
+    return rodin::disarmCompletedFod(gFodAuthCompleted.load(),
+                                    gScreenState.load() == 1,
+                                    gFpOperation.load() != FP_OP_NONE,
+                                    needsIdleFodDisarm());
 }
 
 // Preserve pending physical DOWN events before authentication starts.
 static bool shouldIgnoreIdleDown() {
-    return needsIdleFodDisarm() && gScreenState.load() == 1 &&
-           gFodAuthCompleted.load();
+    return gFodAuthCompleted.load();
 }
 
 static std::atomic<int32_t> gLastEnrollRemaining{-1};
@@ -623,6 +625,15 @@ static bool xiaomiConditionUpdate(
             0);
     }
 
+    if (st == STATUS_OK) {
+        AStatus* replyStatus = nullptr;
+        st = out ? AParcel_readStatusHeader(out, &replyStatus) : STATUS_BAD_VALUE;
+        if (st == STATUS_OK && (!replyStatus || !AStatus_isOk(replyStatus))) {
+            st = STATUS_FAILED_TRANSACTION;
+        }
+        if (replyStatus) AStatus_delete(replyStatus);
+    }
+
     if (out)
         AParcel_delete(out);
 
@@ -792,11 +803,8 @@ static int findFodInput() {
     return -1;
 }
 
-static std::atomic<bool> gAuthSucceededFlag{false};
-static std::chrono::steady_clock::time_point gAuthSucceededTime{};
-
 static void handleFodDown(const char* source, bool force = false) {
-    // Jiiov must not forward idle scanner touches to ColorOS after unlock.
+    // No sensor may start another press after a completed authentication.
     if (shouldIgnoreIdleDown()) {
         return;
     }
@@ -826,7 +834,9 @@ static void handleFodDown(const char* source, bool force = false) {
 }
 
 static void handleFodUp(const char* source) {
-    if (!gPhysicalFodDown.exchange(false)) {
+    const bool wasDown = gPhysicalFodDown.exchange(false);
+    // Listener refresh can clear the shadow DOWN before the real lift arrives.
+    if (!wasDown && !gFodAuthCompleted.load()) {
         return;
     }
     gPendingFodDown.store(false);
@@ -847,17 +857,8 @@ static void handleFodUp(const char* source) {
         return;
     }
 
-    if (gAuthSucceededFlag.load()) {
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - gAuthSucceededTime).count();
-        if (elapsed < 450) {
-            LOGI("handleFodUp (%s): auth grace window active (%lld ms elapsed), keeping touch down for unlock animation",
-                 source, (long long)elapsed);
-            return;
-        }
-        gAuthSucceededFlag.store(false);
-    }
-
+    // Forward the actual physical lift immediately. Never keep a fabricated
+    // DOWN active for an animation timer after the user's finger has lifted.
     sendColorOsTouch(OPLUS_TOUCH_UP);
 }
 
@@ -1701,7 +1702,11 @@ static binder_status_t fpCompatOnTransact(
                 AParcel_readInt32(in, &screenState);
             }
             LOGI("ColorOS SET_SCREEN_STATE screenState=%d", screenState);
-            gScreenState.store(screenState);
+            const int32_t previousScreenState = gScreenState.exchange(screenState);
+            // A genuinely new lock cycle may arm screen-off detection again.
+            if (previousScreenState == 1 && (screenState == 0 || screenState == 2)) {
+                gFodAuthCompleted.store(false);
+            }
 
             if (shouldDisarmIdleFod()) {
                 // The normal screen-on callback follows auth success. Do not
@@ -1842,36 +1847,32 @@ static binder_status_t sessionCompatOnTransact(
     if (!gRealSessionTransact)
         return STATUS_UNKNOWN_TRANSACTION;
 
-    binder_status_t st =
-        gRealSessionTransact(
-            binder,
-            code,
-            in,
-            out);
+    const bool authorized = sharedAuthorizationReady();
+    const int32_t operation = (code == 3 || code == 16) ? FP_OP_ENROLL :
+                              (code == 4 || code == 15) ? FP_OP_AUTH : FP_OP_NONE;
+    binder_status_t st;
+    if (authorized && operation != FP_OP_NONE) {
+        st = rodin::dispatchPreparedFod(
+            [&] { startFingerprintOperation(operation,
+                       operation == FP_OP_ENROLL ? "ENROLL" : "AUTH"); },
+            [&] { return gRealSessionTransact(binder, code, in, out); },
+            [] {
+                gFodAuthCompleted.store(true);
+                gFpOperation.store(FP_OP_NONE);
+                gTouchListener.store(false);
+                gPendingFodDown.store(false);
+                setTouchFeature(0, 10, 0);
+                xiaomiConditionUpdate(4, 0);
+                xiaomiConditionUpdate(1, 0);
+                gXiaomiFodArmed.store(false);
+            });
+    } else {
+        st = gRealSessionTransact(binder, code, in, out);
+    }
+    if (st != STATUS_OK || !authorized) return st;
 
-    if (st != STATUS_OK)
-        return st;
-
-    if (!sharedAuthorizationReady())
-        return st;
-
-    /*
-     * Stable AIDL ISession transaction order used by the
-     * fingerprint V4 interface in this vendor stack.
-     */
-    if (code == 3 || code == 16) {
-
-        startFingerprintOperation(
-            FP_OP_ENROLL,
-            "ENROLL");
-
-    } else if (code == 4 || code == 15) {
-
-        startFingerprintOperation(
-            FP_OP_AUTH,
-            "AUTH");
-
-    } else if (code == 11) {
+    // No post-dispatch arm: the HAL may already have delivered AUTH SUCCESS.
+    if (code == 11) {
 
         gFpOperation.store(
             FP_OP_NONE);
@@ -2181,33 +2182,26 @@ rodinBpOnAuthSucceeded(
         return ::ndk::ScopedAStatus::fromStatus(STATUS_UNKNOWN_TRANSACTION);
     }
 
-    LOGI("AUTH SUCCESS: enrollmentId=%d -> immediately turning off LHBM & arming unlock animation", enrollmentId);
-    gAuthSucceededTime = std::chrono::steady_clock::now();
-    gAuthSucceededFlag.store(true);
+    LOGI("AUTH SUCCESS: enrollmentId=%d -> release illumination", enrollmentId);
+    // Publish completion before hardware cleanup: a concurrent UP, listener
+    // refresh or screen-ON callback must not re-arm capture after success.
+    gFodAuthCompleted.store(true);
+    gFpOperation.store(FP_OP_NONE);
+    gPendingFodDown.store(false);
+    gFodSessionTerminal.store(gPhysicalFodDown.load());
 
-    // Instantly shut down Xiaomi LHBM so optical highlight does not linger while finger is held
-    setTouchFeature(0, 10, 0);
-    xiaomiConditionUpdate(4, 0);
-    xiaomiConditionUpdate(1, 0);
-
-    if (sharedAuthorizationReady()) {
-        // Guarantee isTouchDownNow is asserted in ColorOS SystemUI
-        handleFodDown("auth_success_assert");
+    const bool touchOff = setTouchFeature(0, 10, 0);
+    const bool state4Off = xiaomiConditionUpdate(4, 0);
+    const bool state1Off = xiaomiConditionUpdate(1, 0);
+    gXiaomiFodArmed.store(false);
+    if (!touchOff || !state4Off || !state1Off) {
+        LOGE("AUTH cleanup incomplete: touch=%d state4=%d state1=%d",
+             touchOff, state4Off, state1Off);
     }
 
-    gFodAuthCompleted.store(true);
-
+    // Preserve the real hardware authentication result and token. Do not
+    // generate a new finger-DOWN after success or defer the real UP on a timer.
     ::ndk::ScopedAStatus status = real(self, enrollmentId, hat);
-
-    // Schedule delayed touch up to allow unlock animation to play and QuickLaunch to engage
-    std::thread([]() {
-        std::this_thread::sleep_for(std::chrono::milliseconds(450));
-        if (gAuthSucceededFlag.exchange(false)) {
-            LOGI("Unlock animation grace window elapsed -> sending delayed OPLUS_TOUCH_UP");
-            sendColorOsTouch(OPLUS_TOUCH_UP);
-            gPhysicalFodDown.store(false);
-        }
-    }).detach();
 
     return status;
 }
@@ -2240,8 +2234,7 @@ rodinBpOnAuthFailed(
         return ::ndk::ScopedAStatus::fromStatus(STATUS_UNKNOWN_TRANSACTION);
     }
 
-    LOGI("AUTH FAILED: clearing auth success flag");
-    gAuthSucceededFlag.store(false);
+    LOGI("AUTH FAILED: waiting for the next genuine capture");
 
     return real(self);
 }

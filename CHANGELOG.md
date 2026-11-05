@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-05 - Fingerprint completion and ROM signing
+
+- Keep fingerprint capture disarmed after successful authentication across Goodix/Jiiov sensors and Goodix/FocalTech touch variants until a new lock or biometric operation.
+- Remove the synthetic post-success press and delayed finger-up timer; forward physical lift events immediately.
+- Prepare capture before dispatching the real HAL operation, so an immediate success callback cannot be followed by a stale re-arm.
+- Check the native Xiaomi extension reply status when changing capture conditions.
+- Align the bundled verifier with the maintained signing key. Re-sign the final installed components after updating either binary.
+
 ## 2026-11-05 - AOD brightness ordering
 
 - Cancel delayed AOD brightness recovery after a newer fingerprint or wake request.
