@@ -1,0 +1,15 @@
+# One-shot native storage setup. No daemon remains running.
+service rodin_fod_icon_prepare /system/bin/rodin_fod_icon_prepare
+    disabled
+    oneshot
+    user system
+    group system
+    capabilities CHOWN FOWNER
+
+on post-fs-data
+    restorecon /system/bin/rodin_fod_icon_prepare
+    exec_start rodin_fod_icon_prepare
+
+# Retry after first-boot SystemUI app-data creation.
+on property:sys.boot_completed=1
+    exec_start rodin_fod_icon_prepare

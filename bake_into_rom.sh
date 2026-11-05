@@ -63,6 +63,44 @@ echo "System Root: $SYS_DIR"
 echo "Vendor Root: $VEN_DIR"
 echo ""
 
+# The helper must be built before mutating the destination image.
+if [ ! -x "$SRC_DIR/system/bin/rodin_fod_icon_prepare" ]; then
+  echo "Error: Run scripts/build_fod.sh first to build custom fingerprint icon storage support" >&2
+  exit 1
+fi
+
+EXT_SEPOLICY=""
+for EXT_DIR in "$ROM_ROOT/system_ext" "$ROM_ROOT/system/system_ext"; do
+  if [ -f "$EXT_DIR/etc/selinux/system_ext_sepolicy.cil" ]; then
+    EXT_SEPOLICY="$EXT_DIR/etc/selinux/system_ext_sepolicy.cil"
+    break
+  fi
+done
+if [ -z "$EXT_SEPOLICY" ]; then
+  echo "Error: Missing system_ext_sepolicy.cil for native icon initializer policy" >&2
+  exit 1
+fi
+if ! grep -q '^(type rodin_fod_icon_exec)' "$EXT_SEPOLICY"; then
+  printf '\n' >> "$EXT_SEPOLICY"
+  cat "$SRC_DIR/sepolicy/system_ext_icon.cil.append" >> "$EXT_SEPOLICY"
+fi
+
+# Custom icons are saved by SystemUI as /data/oplus/os/<userId>custom_icon.png.
+# Keep the parent searchable, not world-writable; the helper discovers real app UIDs.
+mkdir -p "$SYS_DIR/etc/init"
+install -m 0755 "$SRC_DIR/system/bin/rodin_fod_icon_prepare" "$SYS_DIR/bin/rodin_fod_icon_prepare"
+install -m 0644 "$SRC_DIR/system/etc/init/rodin.fod-icon.rc" "$SYS_DIR/etc/init/rodin.fod-icon.rc"
+chcon u:object_r:rodin_fod_icon_exec:s0 "$SYS_DIR/bin/rodin_fod_icon_prepare" 2>/dev/null || true
+chcon u:object_r:system_file:s0 "$SYS_DIR/etc/init/rodin.fod-icon.rc" 2>/dev/null || true
+if ! grep -q '^/system/bin/rodin_fod_icon_prepare ' "$FC"; then
+  printf '\n/system/bin/rodin_fod_icon_prepare -- u:object_r:rodin_fod_icon_exec:s0\n/system/etc/init/rodin[.]fod-icon[.]rc -- u:object_r:system_file:s0\n' >> "$FC"
+fi
+# Repair the conflicting performance-service rule only if this ROM contains it.
+PERF_RC="$ROM_ROOT/odm/etc/init/vendor-oplus-hardware-performance-V1-service.rc"
+if [ -f "$PERF_RC" ]; then
+  sed -i -E 's@^([[:space:]]*mkdir /data/oplus/os )0770( system system[[:space:]]*)$@\10771\2@' "$PERF_RC"
+fi
+
 # 1. Install AOD Daemon
 echo "-> [1/7] Installing nees_aodd to $SYS_DIR/bin/"
 cp -f "$SCRIPT_DIR/system/bin/nees_aodd" "$SYS_DIR/bin/nees_aodd"

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(rodin_fp_compat LANGUAGES CXX)
+project(rodin_fp_compat LANGUAGES C CXX)
 
 add_library(rodin_fp_compat SHARED
     rodin_fp_compat.cpp
@@ -16,3 +16,10 @@ target_link_libraries(rodin_fp_compat
     log
     dl
 )
+
+# Runs once at boot; keeps native custom-icon storage owned by its real app UID.
+add_executable(rodin_fod_icon_prepare rodin_fod_icon_prepare.c)
+target_compile_options(rodin_fod_icon_prepare PRIVATE -Wall -Wextra -Werror)
+target_link_options(rodin_fod_icon_prepare PRIVATE -Wl,-z,relro,-z,now)
+
+target_link_libraries(rodin_fod_icon_prepare log)

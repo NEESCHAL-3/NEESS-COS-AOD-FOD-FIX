@@ -11,3 +11,5 @@ cmake --build "$SRC/native/build" -j"$(nproc)"
 timeout 3 "$SRC/native/build/input-policy-tests"
 file "$SRC/native/build/librodin_fp_compat.so"
 sha256sum "$SRC/native/build/librodin_fp_compat.so"
+
+install -m 0755 "$SRC/native/build/rodin_fod_icon_prepare" "$ROOT/system/bin/rodin_fod_icon_prepare"

@@ -1,3 +1,6 @@
 # POCO X7 Pro (Rodin) AOD Daemon & Init Service
 /system/bin/nees_aodd                   u:object_r:shell_exec:s0
 /system/etc/init/nees_aodd\.rc          u:object_r:system_file:s0
+
+/system/bin/rodin_fod_icon_prepare -- u:object_r:rodin_fod_icon_exec:s0
+/system/etc/init/rodin[.]fod-icon[.]rc -- u:object_r:system_file:s0

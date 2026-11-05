@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-05 - Custom fingerprint icons
+
+- Fix custom fingerprint icons saving in Settings but showing the default on the lock screen.
+- Preserve saved images across reboot and assign native icon storage to each user’s SystemUI UID.
+- Repair the conflicting performance init directory permission without making the directory world-writable.
+
 ## 2026-09-27 - Jiiov FOD idle-touch fix
 
 - On Jiiov FOD, disarm idle screen-on fingerprint touch after unlock to prevent stray LHBM illumination; re-arm for screen-off use or a new biometric operation. Goodix FOD retains its previous behavior.

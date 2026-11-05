@@ -155,3 +155,39 @@ ls -lZ /vendor/lib64/librodin_fp_compat.so
 getprop init.svc.nees_aodd
 getprop init.svc.mfp-daemon
 ```
+
+## Custom fingerprint icons
+
+Run `scripts/build_fod.sh` before baking. This builds the native, one-shot
+`/system/bin/rodin_fod_icon_prepare` and installs it with
+`/system/etc/init/rodin.fod-icon.rc`. The binary uses `rodin_fod_icon_exec`
+and mode 0755; the RC uses `system_file` and mode 0644. Both are root:root.
+The bake step adds `sepolicy/system_ext_icon.cil.append` to system_ext policy:
+this defines a dedicated domain and executable type. Init transitions into
+`rodin_fod_icon`; the utility runs as system with only CHOWN and FOWNER
+capabilities to assign the icon files. It reads PackageManager’s UID map and
+has no access to private app data. Recompile the combined ROM policy and
+apply the matching file context when packing. The post-fs-data action also
+restores that context before executing it.
+
+ColorOS SystemUI saves icons directly to `/data/oplus/os/<userId>custom_icon.png`.
+The user ID is a filename prefix; do not insert another slash. A port's performance
+init rule can reset `/data/oplus/os` to system:system 0770, causing EACCES even
+though Settings accepts the icon. The bake step changes that conflicting rule to
+0771 where present. The initializer also restores 0771 and prepares each existing
+user's exact icon file using the SystemUI app ID from PackageManager’s
+`/data/system/packages.list`. It does not truncate images or make the
+directory writable by other apps.
+
+The initializer runs before framework startup and retries after boot completes,
+so a first boot can resolve PackageManager’s newly created UID entry. After
+creating a new Android user, reboot before using custom icons for that user.
+The existing ColorOS `platform_app` access to `os_data_file` is required; no
+permissive domain or extra SystemUI data-access grant is installed by this fix.
+After installation, select the custom icon again to retry the previously failed
+copy, then check it on the lock screen and after reboot. This storage fix is
+independent of Goodix/Jiiov fingerprint sensors and Goodix/FocalTech touch panels.
+
+Check the automatic boot run with `adb shell logcat -d -s RodinFodIcon`.
+The completion line must report `failures=0`; `init.svc.rodin_fod_icon_prepare`
+should be `stopped` after the one-shot completes.
