@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-05 - AOD brightness ordering
+
+- Cancel delayed AOD brightness recovery after a newer fingerprint or wake request.
+- Serialize panel writes and recheck request ownership after the power-state query, preventing stale requests from overwriting newer brightness decisions.
+
 ## 2026-11-05 - Custom fingerprint icons
 
 - Fix custom fingerprint icons saving in Settings but showing the default on the lock screen.

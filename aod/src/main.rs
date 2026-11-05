@@ -1,4 +1,6 @@
 mod power_state;
+mod panel_writes;
+static PANEL_WRITES: panel_writes::PanelWrites = panel_writes::PanelWrites::new();
 use power_state::{parse_power_state, PowerState};
 
 use std::{
@@ -167,21 +169,25 @@ fn settings_put_async(name: &'static str, value: &'static str) {
 }
 
 
-fn write_backlight(value: u32) {
-    if read_backlight() == Some(value) {
-        return;
-    }
-    // Logcat may deliver an old icon-hide event after fingerprint unlock.
-    // Unknown or interactive power states never grant AOD panel ownership.
-    if !read_power_state().permits_panel_override() {
-        klog("Panel override skipped: display is interactive or state is unavailable");
-        return;
-    }
+fn commit_backlight(value: u32) {
     if let Ok(mut f) = OpenOptions::new().write(true).open(BL) {
         if let Err(error) = write!(f, "{value}") {
             klog(&format!("Panel override failed: {error}"));
         }
     }
+}
+
+fn write_backlight(value: u32) {
+    let ticket = PANEL_WRITES.invalidate();
+    PANEL_WRITES.apply(ticket, || {
+        if read_backlight() == Some(value) { return false; }
+        // A wake arriving during this query invalidates the result before writing.
+        if !read_power_state().permits_panel_override() {
+            klog("Panel override skipped: display is interactive or state is unavailable");
+            return false;
+        }
+        true
+    }, || commit_backlight(value));
 }
 
 fn read_backlight() -> Option<u32> {
@@ -192,15 +198,13 @@ fn read_backlight() -> Option<u32> {
         .ok()
 }
 
-fn ensure_aod_backlight() {
-    // write_backlight performs the fresh power-state guard. Avoid a second
-    // dumpsys round trip before the same guarded write.
-    if read_backlight() == Some(0) {
-        write_backlight(AOD_BL);
-        thread::sleep(Duration::from_millis(20));
-        let after = read_backlight().unwrap_or(9999);
-        klog(&format!("AOD backlight 0 -> {after}"));
-    }
+fn ensure_aod_backlight(ticket: u64) {
+    PANEL_WRITES.apply(ticket, || {
+        read_backlight() == Some(0) && read_power_state().permits_panel_override()
+    }, || {
+        commit_backlight(AOD_BL);
+        klog("AOD backlight recovery requested");
+    });
 }
 
 fn read_power_state() -> PowerState {
@@ -361,6 +365,7 @@ fn main() {
             if (line.contains("setScreenState changed:") && line.contains("->ON"))
                 || line.contains("Waking up from")
             {
+                PANEL_WRITES.invalidate();
                 fp_panel_allowed = false;
                 pending_energy_hide = false;
                 tap_clock_active = false;
@@ -384,9 +389,10 @@ fn main() {
                 && line.contains("->DOZE")
                 && !fp_only_phase
             {
-                thread::spawn(|| {
+                let ticket = PANEL_WRITES.current();
+                thread::spawn(move || {
                     thread::sleep(Duration::from_millis(150));
-                    ensure_aod_backlight();
+                    ensure_aod_backlight(ticket);
                 });
             }
 
