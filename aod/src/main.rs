@@ -223,9 +223,9 @@ fn display_really_awake() -> bool {
 }
 
 fn is_aod_master_enabled() -> bool {
-    settings_get("Setting_AodEnable")
+    settings_get("Setting_AodSwitchEnable")
         .map(|v| v == "1")
-        .unwrap_or(true)
+        .unwrap_or(false)
 }
 
 fn is_all_day_aod() -> bool {
@@ -321,14 +321,10 @@ fn main() {
     }
 
     let aod_enabled = is_aod_master_enabled();
-    if aod_enabled {
-        settings_put_sync("Setting_AodSwitchEnable", "1");
-    } else {
-        settings_put_sync("Setting_AodSwitchEnable", "0");
-    }
     klog("started AOD=28 FP=100 (ready)");
 
     let mut pending_energy_hide = false;
+    let mut energy_hide_active = false;
     let mut fp_only_phase = !aod_enabled;
     let mut fp_panel_allowed = !aod_enabled;
     let mut tap_clock_active = false;
@@ -381,6 +377,7 @@ fn main() {
                 tap_clock_active = true;
                 fp_only_phase = false;
                 pending_energy_hide = false;
+                energy_hide_active = false;
                 fp_panel_allowed = true;
             }
 
@@ -418,6 +415,7 @@ fn main() {
                 if !is_all_day_aod() && !aod_scheduled_now() {
                     tap_clock_active = false;
                     pending_energy_hide = true;
+                    energy_hide_active = true;
                     // CRITICAL: Immediately disable AOD switch in background!
                     // This ensures ColorOS enters Screen-Off Fingerprint (SOFOD) mode
                     // before the screen reaches OFF, eliminating any race condition on instant pickup.
@@ -484,18 +482,25 @@ fn main() {
                 fp_panel_allowed = false;
                 klog("SCREEN ON -> release FP brightness control");
 
-                if fp_only_phase {
-                    pending_energy_hide = false;
+                pending_energy_hide = false;
+                let was_energy_hidden = energy_hide_active;
+                energy_hide_active = false;
+
+                if was_energy_hidden {
                     fp_only_phase = false;
 
-                    // Restore AOD switch for next sleep cycle in background
+                    // Restore AOD switch for next sleep cycle in background only if
+                    // daemon temporarily hid it for power-saving timeout
                     thread::spawn(|| {
                         thread::sleep(Duration::from_millis(500));
-                        if display_really_awake() && is_aod_master_enabled() {
+                        if display_really_awake() {
                             settings_put_sync("Setting_AodSwitchEnable", "1");
                             klog("real wake -> AOD content restored (Setting_AodSwitchEnable=1)");
                         }
                     });
+                } else {
+                    let aod_on = is_aod_master_enabled();
+                    fp_only_phase = !aod_on;
                 }
             }
         }
