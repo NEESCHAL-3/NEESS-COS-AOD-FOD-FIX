@@ -51,8 +51,16 @@ establish equal speed on every sensor.
 | SOFOD | Fingerprint unlock while the display is off. |
 | SOFOD hint | Fingerprint icon appears on the screen-off display when needed. |
 | Rise to wake | A gentle lift wakes the lock screen and keeps the SOFOD hint working. |
+| Front ALS & Auto-Brightness Stream | Bridges Xiaomi `als_raw` photodiode events to `android.sensor.light` and subtracts OLED panel optical leakage. |
 | Jiiov idle FOD touch | After unlock, Jiiov FOD touch is disarmed on the screen-on launcher so stray presses do not illuminate LHBM; screen-off and new biometric sessions re-arm it. Goodix FOD behavior is unchanged. |
 | AOD | All three ColorOS AOD modes work, including All day and Power saving; the vendor Doze overlay supplies the framework Doze service and light sensor resources. |
+
+---
+
+## Companion Compatibility Repositories
+
+- **ColorOS Display & Brightness Mapping ([Coloros-display-autobrightness-fix-Rodin](https://github.com/NEESCHAL-3/Coloros-display-autobrightness-fix-Rodin))**:
+  Provides the physical DisplayDeviceConfig XML (`display_id_4627039422300187648.xml`), 2.0-nit night brightness floor adjustment (`display_brightness_config_default.xml`), and ColorOS lux-to-nit spline curves. Pairs with this repository's sensor HAL (`sensors.mt6899.so`) to deliver calibrated, instant auto-brightness without binary overwrite conflicts.
 
 The Rise to wake fix is on current `main`; the earlier `v4.0-working-final` tag does not include it.
 

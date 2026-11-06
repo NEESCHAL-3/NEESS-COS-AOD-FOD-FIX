@@ -1,12 +1,15 @@
 #include <dlfcn.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
+#include <math.h>
 #include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <android/log.h>
 
 #define LOG_TAG "RodinSensorCompat"
@@ -22,6 +25,8 @@
 #define XIAOMI_FOD_TYPE       33171030
 #define XIAOMI_AOD_TYPE       33171029
 #define XIAOMI_IMU_HAND_TYPE  33171120
+#define XIAOMI_ALS_RAW_TYPE   33171111
+#define SENSOR_TYPE_LIGHT     5
 #define MTK_TILT_TYPE         22
 #define MTK_SMD_TYPE          17
 #define OPLUS_TILT_TYPE       65611
@@ -206,6 +211,8 @@ static int g_fod_handle = -1;
 static int g_aod_handle = -1;
 static int g_smd_handle = -1;
 static int g_hand_handle = -1;
+static int g_als_handle = 5;
+static int g_als_raw_handle = 0x5e;
 static int g_synth_handle = OPLUS_TILT_HANDLE;
 
 static sensor_dev_prefix *g_dev;
@@ -221,11 +228,14 @@ static inject_fn g_orig_inject;
 static int g_pickup_enabled;
 static int g_synth_enabled;
 static int g_tilt_enabled;
+static int g_als_enabled;
+static float g_last_lux = -1.0f;
+static int64_t g_last_lux_report_ts;
 
 static sensors_event_t *g_scratch;
 static size_t g_scratch_cap;
 
-#define PENDING_MAX 32
+#define PENDING_MAX 64
 
 static sensors_event_t g_pending[PENDING_MAX];
 static unsigned g_pending_head;
@@ -399,6 +409,26 @@ static int build_sensor_list_locked(void)
                  real_list[i].name ?
                     real_list[i].name :
                     "(null)");
+        } else if (real_list[i].type == SENSOR_TYPE_LIGHT) {
+            g_als_handle =
+                real_list[i].handle;
+
+            LOGI("found front ALS handle=%d flags=0x%x name=%s",
+                 g_als_handle,
+                 real_list[i].flags,
+                 real_list[i].name ?
+                    real_list[i].name :
+                    "(null)");
+        } else if (real_list[i].type == XIAOMI_ALS_RAW_TYPE) {
+            g_als_raw_handle =
+                real_list[i].handle;
+
+            LOGI("found front ALS raw handle=%d flags=0x%x name=%s",
+                 g_als_raw_handle,
+                 real_list[i].flags,
+                 real_list[i].name ?
+                    real_list[i].name :
+                    "(null)");
         }
     }
 
@@ -549,6 +579,23 @@ static int compat_activate(
 
     enabled = !!enabled;
 
+    if (g_als_handle >= 0 && handle == g_als_handle) {
+        pthread_mutex_lock(&g_lock);
+        g_als_enabled = enabled;
+        LOGI("activate front ALS handle=%d enabled=%d (raw_handle=%d)",
+             g_als_handle, enabled, g_als_raw_handle);
+        int r1 = g_orig_activate(dev, g_als_handle, enabled);
+        int r2 = 0;
+        if (g_als_raw_handle >= 0) {
+            r2 = g_orig_activate(dev, g_als_raw_handle, enabled);
+            if (enabled && g_orig_setDelay) {
+                g_orig_setDelay(dev, g_als_raw_handle, 200000000LL);
+            }
+        }
+        pthread_mutex_unlock(&g_lock);
+        return (r1 == 0) ? r1 : r2;
+    }
+
     if (handle != g_synth_handle &&
         handle != g_pickup_handle &&
         handle != g_tilt_handle) {
@@ -644,6 +691,13 @@ static int compat_setDelay(
     if (!g_orig_setDelay)
         return -EINVAL;
 
+    if (g_als_handle >= 0 && handle == g_als_handle) {
+        if (g_als_raw_handle >= 0) {
+            g_orig_setDelay(dev, g_als_raw_handle, ns);
+        }
+        return g_orig_setDelay(dev, handle, ns);
+    }
+
     if (handle == g_synth_handle ||
         handle == g_tilt_handle) {
 
@@ -666,6 +720,13 @@ static int compat_batch(
 {
     if (!g_orig_batch)
         return -EINVAL;
+
+    if (g_als_handle >= 0 && handle == g_als_handle) {
+        if (g_als_raw_handle >= 0) {
+            g_orig_batch(dev, g_als_raw_handle, flags, sampling_ns, latency_ns);
+        }
+        return g_orig_batch(dev, handle, flags, sampling_ns, latency_ns);
+    }
 
     if (handle == g_synth_handle ||
         handle == g_tilt_handle) {
@@ -746,6 +807,86 @@ static int ensure_scratch(
     return 1;
 }
 
+struct cali_point {
+    float bl;
+    float clear;
+    float ir;
+};
+
+static const struct cali_point k_cali[] = {
+    { 0.0f,    0.0f,     0.0f },
+    { 10.0f,   125.0f,   15.0f },
+    { 50.0f,   547.0f,   71.0f },
+    { 100.0f,  1071.0f,  137.0f },
+    { 150.0f,  1573.0f,  198.0f },
+    { 200.0f,  2108.0f,  269.0f },
+    { 250.0f,  2619.0f,  331.0f },
+    { 300.0f,  3151.0f,  400.0f },
+    { 350.0f,  3520.0f,  446.0f },
+    { 400.0f,  3914.0f,  497.0f },
+    { 450.0f,  4333.0f,  549.0f },
+    { 500.0f,  4779.0f,  605.0f },
+    { 550.0f,  5294.0f,  670.0f },
+    { 600.0f,  5833.0f,  739.0f },
+    { 650.0f,  6422.0f,  814.0f },
+    { 800.0f,  8297.0f,  1041.0f },
+    { 950.0f,  9742.0f,  1224.0f },
+    { 1100.0f, 11436.0f, 1433.0f },
+    { 1250.0f, 13139.0f, 1651.0f },
+    { 1400.0f, 14667.0f, 1838.0f },
+    { 1550.0f, 16309.0f, 2045.0f },
+    { 1700.0f, 18034.0f, 2259.0f },
+    { 1850.0f, 19634.0f, 2457.0f },
+    { 2047.0f, 21931.0f, 2740.0f },
+    { 2300.0f, 25363.0f, 3171.0f },
+    { 2600.0f, 30336.0f, 3766.0f },
+};
+#define CALI_LEN (sizeof(k_cali) / sizeof(k_cali[0]))
+
+static int g_backlight_fd = -1;
+
+static float get_current_backlight(void) {
+    if (g_backlight_fd < 0) {
+        g_backlight_fd = open("/sys/class/mi_display/disp-DSI-0/backlight", O_RDONLY | O_CLOEXEC);
+        if (g_backlight_fd < 0) {
+            g_backlight_fd = open("/sys/devices/virtual/mi_display/disp-DSI-0/backlight", O_RDONLY | O_CLOEXEC);
+        }
+    }
+    if (g_backlight_fd >= 0) {
+        char buf[32];
+        ssize_t n = pread(g_backlight_fd, buf, sizeof(buf) - 1, 0);
+        if (n > 0) {
+            buf[n] = '\0';
+            return (float)atoi(buf);
+        }
+    }
+    return 0.0f;
+}
+
+static void get_display_leakage(float bl, float *out_clear, float *out_ir) {
+    if (bl <= 0.0f) {
+        *out_clear = 0.0f;
+        *out_ir = 0.0f;
+        return;
+    }
+    if (bl >= k_cali[CALI_LEN - 1].bl) {
+        float d_bl = bl - k_cali[CALI_LEN - 1].bl;
+        *out_clear = k_cali[CALI_LEN - 1].clear + 16.577f * d_bl;
+        *out_ir = k_cali[CALI_LEN - 1].ir + 1.983f * d_bl;
+        return;
+    }
+    for (size_t i = 1; i < CALI_LEN; ++i) {
+        if (bl <= k_cali[i].bl) {
+            float frac = (bl - k_cali[i-1].bl) / (k_cali[i].bl - k_cali[i-1].bl);
+            *out_clear = k_cali[i-1].clear + frac * (k_cali[i].clear - k_cali[i-1].clear);
+            *out_ir = k_cali[i-1].ir + frac * (k_cali[i].ir - k_cali[i-1].ir);
+            return;
+        }
+    }
+    *out_clear = k_cali[CALI_LEN - 1].clear;
+    *out_ir = k_cali[CALI_LEN - 1].ir;
+}
+
 static int compat_poll(
     sensor_dev_prefix *dev,
     sensors_event_t *out,
@@ -804,6 +945,78 @@ static int compat_poll(
 
         sensors_event_t ev =
             g_scratch[i];
+
+        int is_als = (g_als_handle >= 0 && ev.sensor == g_als_handle);
+        if (is_als) {
+            /* Drop dummy/stale events from real HAL (e.g. boot-time 1.00) */
+            continue;
+        }
+
+        int is_als_raw = ((g_als_raw_handle >= 0 && ev.sensor == g_als_raw_handle) ||
+                          ev.type == XIAOMI_ALS_RAW_TYPE);
+        if (is_als_raw) {
+            float clear = ev.data[0];
+            float ir = ev.data[1];
+
+            float bl = get_current_backlight();
+            float leak_c = 0.0f, leak_ir = 0.0f;
+            get_display_leakage(bl, &leak_c, &leak_ir);
+
+            float c_net = clear - leak_c;
+            float ir_net = ir - leak_ir;
+            if (c_net < 0.0f) c_net = 0.0f;
+            if (ir_net < 0.0f) ir_net = 0.0f;
+
+            float lux = 0.0f;
+            if (c_net >= 80.0f) {
+                float ratio = ir_net / (c_net + 0.001f);
+                float scale = 79.832f / 6400.0f;
+                if (ratio < 4.9f) {
+                    float l1 = (c_net - 0.265f * ir_net) * scale;
+                    float l2 = (0.797f * c_net - 0.160f * ir_net) * scale;
+                    lux = (l1 > l2) ? l1 : l2;
+                } else {
+                    lux = (c_net * 0.10f) * scale;
+                }
+                if (lux < 0.0f) lux = 0.0f;
+            }
+
+            if (written < count) {
+                out[written++] = ev;
+            } else {
+                queue_pending_locked(&ev);
+            }
+
+            if (g_als_enabled) {
+                int64_t now_ts = ev.timestamp;
+                float diff = fabsf(lux - g_last_lux);
+                if (g_last_lux < 0.0f || diff >= 1.0f || (diff / (g_last_lux + 0.1f) >= 0.05f) ||
+                    (lux == 0.0f && g_last_lux > 0.0f) ||
+                    (now_ts - g_last_lux_report_ts >= 1000000000LL)) {
+
+                    sensors_event_t syn;
+                    memset(&syn, 0, sizeof(syn));
+                    syn.version = sizeof(sensors_event_t);
+                    syn.sensor = g_als_handle >= 0 ? g_als_handle : 5;
+                    syn.type = SENSOR_TYPE_LIGHT;
+                    syn.timestamp = now_ts;
+                    syn.data[0] = lux;
+
+                    g_last_lux = lux;
+                    g_last_lux_report_ts = now_ts;
+
+                    if (written < count) {
+                        out[written++] = syn;
+                    } else {
+                        queue_pending_locked(&syn);
+                    }
+
+                    LOGI("synthesized front ALS lux=%.2f (c_net=%.1f ir_net=%.1f c_raw=%.1f bl=%.0f) -> handle=%d",
+                         lux, c_net, ir_net, clear, bl, syn.sensor);
+                }
+            }
+            continue;
+        }
 
         int is_pickup =
             (g_pickup_handle >= 0 &&
@@ -939,6 +1152,14 @@ static int compat_close(
         g_pickup_enabled = 0;
         g_synth_enabled = 0;
         g_tilt_enabled = 0;
+        g_als_enabled = 0;
+        g_last_lux = -1.0f;
+        g_last_lux_report_ts = 0;
+
+        if (g_backlight_fd >= 0) {
+            close(g_backlight_fd);
+            g_backlight_fd = -1;
+        }
 
         g_pending_head = 0;
         g_pending_count = 0;
